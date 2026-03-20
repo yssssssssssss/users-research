@@ -282,6 +282,33 @@ const getFetch = (config?: ModelClientConfig): typeof fetch => {
   return fetchImpl.bind(globalThis);
 };
 
+const DEFAULT_TEXT_TIMEOUT_MS = 30000;
+const DEFAULT_STREAM_TIMEOUT_MS = 45000;
+
+const fetchWithTimeout = async (
+  fetchImpl: typeof fetch,
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetchImpl(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`模型请求超时（>${timeoutMs}ms）`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+};
+
 const normalizeJdcloudUrl = (url: string, preferProxyPath?: boolean): string => {
   const trimmed = (url || '').trim();
   if (!trimmed) return trimmed;
@@ -871,7 +898,7 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
       ...messages,
     ];
 
-    const response = await fetchImpl(url, {
+    const response = await fetchWithTimeout(fetchImpl, url, {
       method: 'POST',
       headers: buildHeaders(key),
       body: JSON.stringify(
@@ -888,7 +915,7 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
               stream: false,
             },
       ),
-    });
+    }, DEFAULT_TEXT_TIMEOUT_MS);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
@@ -929,7 +956,7 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
       ...messages,
     ];
 
-    const response = await fetchImpl(url, {
+    const response = await fetchWithTimeout(fetchImpl, url, {
       method: 'POST',
       headers: buildHeaders(key),
       body: JSON.stringify(
@@ -946,7 +973,7 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
               stream: true,
             },
       ),
-    });
+    }, DEFAULT_STREAM_TIMEOUT_MS);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
