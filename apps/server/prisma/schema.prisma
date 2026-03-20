@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TaskStatus {
+  draft
+  queued
+  running
+  partial_failed
+  awaiting_review
+  completed
+  cancelled
+  failed
+}
+
+enum ReviewStatus {
+  not_required
+  pending
+  approved
+  rejected
+  rework_required
+}
+
+enum RqLevel {
+  RQ0
+  RQ1
+  RQ2
+  RQ3
+}
+
+enum TierLevel {
+  T1
+  T2
+  T3
+}
+
+enum OutputType {
+  judgment_card
+  light_report
+  evidence_report
+  design_review_report
+  hypothesis_pack
+}
+
+model ResearchTask {
+  id             String        @id @default(uuid())
+  title          String?
+  query          String
+  inputType      String
+  taskMode       String
+  status         TaskStatus
+  reviewStatus   ReviewStatus
+  rqLevel        RqLevel?
+  enabledModules Json
+  inputFiles     Json?
+  designFiles    Json?
+  currentNode    String?
+  currentStage   String?
+  createdBy      String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  finishedAt     DateTime?
+  subQuestions   SubQuestion[]
+  evidenceItems  EvidenceItem[]
+  evidenceConflicts EvidenceConflict[]
+  visionFindings VisionFinding[]
+  personaFindings PersonaFinding[]
+  candidateOutputs CandidateOutput[]
+  reports        Report[]
+}
+
+model SubQuestion {
+  id            String       @id @default(uuid())
+  taskId        String
+  seq           Int
+  text          String
+  audience      String?
+  scenario      String?
+  journeyPath   String?
+  decisionPoint String?
+  status        String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  task          ResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model EvidenceItem {
+  id              String       @id @default(uuid())
+  taskId          String
+  subQuestionId   String?
+  sourceType      String
+  sourceLevel     String
+  tier            TierLevel
+  confidenceScore Float?
+  sourceName      String?
+  sourceUrl       String?
+  sourceDate      DateTime?
+  traceLocation   Json?
+  content         String
+  citationText    String?
+  isUsedInReport  Boolean      @default(false)
+  reviewStatus    String       @default("unreviewed")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  task            ResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model EvidenceConflict {
+  id             String       @id @default(uuid())
+  taskId         String
+  topic          String
+  evidenceAId    String
+  evidenceBId    String
+  conflictReason String
+  status         String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  task           ResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model VisionFinding {
+  id               String       @id @default(uuid())
+  taskId           String
+  findingType      String
+  riskLevel        String
+  content          String
+  regionRef        Json?
+  consensusGroupId String?
+  isConsensus      Boolean      @default(false)
+  isConflict       Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  task             ResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model PersonaFinding {
+  id           String       @id @default(uuid())
+  taskId       String
+  personaName  String
+  stance       String?
+  theme        String?
+  content      String
+  isSimulated  Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  task         ResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model CandidateOutput {
+  id          String       @id @default(uuid())
+  taskId      String
+  outputType  OutputType
+  sourceNode  String
+  gateLevel   String?
+  summary     String?
+  contentJson Json
+  status      String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  task        ResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model Report {
+  id              String       @id @default(uuid())
+  taskId          String
+  reportType      OutputType
+  version         Int
+  gateResult      Json
+  contentJson     Json
+  markdownContent String?
+  htmlContent     String?
+  status          String
+  approvedBy      String?
+  approvedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  task            ResearchTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}

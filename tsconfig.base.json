@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@users-research/shared": ["packages/shared/src/index.ts"],
+      "@users-research/shared/*": ["packages/shared/src/*"],
+      "@users-research/model-clients": ["packages/model-clients/src/index.ts"]
+    }
+  }
+}
