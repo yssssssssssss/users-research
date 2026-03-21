@@ -309,6 +309,34 @@ const fetchWithTimeout = async (
   }
 };
 
+const runWithTimeout = async <T>(
+  label: string,
+  timeoutMs: number,
+  operation: Promise<T>,
+): Promise<T> => {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(`${label}超时`);
+  }
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`${label}（>${timeoutMs}ms）`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+};
+
+const getRemainingTimeout = (startedAt: number, totalTimeoutMs: number): number =>
+  Math.max(1, totalTimeoutMs - (Date.now() - startedAt));
+
 const normalizeJdcloudUrl = (url: string, preferProxyPath?: boolean): string => {
   const trimmed = (url || '').trim();
   if (!trimmed) return trimmed;
@@ -898,30 +926,46 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
       ...messages,
     ];
 
-    const response = await fetchWithTimeout(fetchImpl, url, {
-      method: 'POST',
-      headers: buildHeaders(key),
-      body: JSON.stringify(
-        isAnthropic
-          ? buildAnthropicPayload({
-              model,
-              messages: finalMessages,
-              systemPrompt: systemPrompt || config.defaultSystemPrompt || DEFAULT_SYSTEM_PROMPT,
-              stream: false,
-            })
-          : {
-              model,
-              messages: finalMessages,
-              stream: false,
-            },
-      ),
-    }, DEFAULT_TEXT_TIMEOUT_MS);
+    const startedAt = Date.now();
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      url,
+      {
+        method: 'POST',
+        headers: buildHeaders(key),
+        body: JSON.stringify(
+          isAnthropic
+            ? buildAnthropicPayload({
+                model,
+                messages: finalMessages,
+                systemPrompt: systemPrompt || config.defaultSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+                stream: false,
+              })
+            : {
+                model,
+                messages: finalMessages,
+                stream: false,
+              },
+        ),
+      },
+      getRemainingTimeout(startedAt, DEFAULT_TEXT_TIMEOUT_MS),
+    );
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      throw new Error(
+        `HTTP ${response.status}: ${await runWithTimeout(
+          '模型错误响应读取超时',
+          getRemainingTimeout(startedAt, DEFAULT_TEXT_TIMEOUT_MS),
+          response.text(),
+        )}`,
+      );
     }
 
-    const data = await response.json();
+    const data = await runWithTimeout(
+      '模型响应解析超时',
+      getRemainingTimeout(startedAt, DEFAULT_TEXT_TIMEOUT_MS),
+      response.json(),
+    );
     const text = isAnthropic
       ? parseAnthropicText(data as AnthropicMessageResponse)
       : parseChatText(data as ChatCompletionResponse);
@@ -956,31 +1000,47 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
       ...messages,
     ];
 
-    const response = await fetchWithTimeout(fetchImpl, url, {
-      method: 'POST',
-      headers: buildHeaders(key),
-      body: JSON.stringify(
-        isAnthropic
-          ? buildAnthropicPayload({
-              model,
-              messages: finalMessages,
-              systemPrompt: systemPrompt || config.defaultSystemPrompt || DEFAULT_SYSTEM_PROMPT,
-              stream: true,
-            })
-          : {
-              model,
-              messages: finalMessages,
-              stream: true,
-            },
-      ),
-    }, DEFAULT_STREAM_TIMEOUT_MS);
+    const startedAt = Date.now();
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      url,
+      {
+        method: 'POST',
+        headers: buildHeaders(key),
+        body: JSON.stringify(
+          isAnthropic
+            ? buildAnthropicPayload({
+                model,
+                messages: finalMessages,
+                systemPrompt: systemPrompt || config.defaultSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+                stream: true,
+              })
+            : {
+                model,
+                messages: finalMessages,
+                stream: true,
+              },
+        ),
+      },
+      getRemainingTimeout(startedAt, DEFAULT_STREAM_TIMEOUT_MS),
+    );
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      throw new Error(
+        `HTTP ${response.status}: ${await runWithTimeout(
+          '模型错误响应读取超时',
+          getRemainingTimeout(startedAt, DEFAULT_STREAM_TIMEOUT_MS),
+          response.text(),
+        )}`,
+      );
     }
 
     if (!response.body) {
-      const data = await response.json();
+      const data = await runWithTimeout(
+        '流式响应解析超时',
+        getRemainingTimeout(startedAt, DEFAULT_STREAM_TIMEOUT_MS),
+        response.json(),
+      );
       const text = isAnthropic
         ? parseAnthropicText(data as AnthropicMessageResponse)
         : parseChatText(data as ChatCompletionResponse);
@@ -995,91 +1055,104 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
     let fullText = '';
     let anthropicEvent = '';
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
+    try {
       while (true) {
-        const idx = buffer.indexOf('\n');
-        if (idx < 0) break;
+        const { value, done } = await runWithTimeout(
+          '流式读取超时',
+          getRemainingTimeout(startedAt, DEFAULT_STREAM_TIMEOUT_MS),
+          reader.read(),
+        );
+        if (done) break;
 
-        const rawLine = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 1);
+        buffer += decoder.decode(value, { stream: true });
 
-        const line = rawLine.trim();
-        if (!line) {
-          anthropicEvent = '';
-          continue;
-        }
+        while (true) {
+          const idx = buffer.indexOf('\n');
+          if (idx < 0) break;
 
-        if (isAnthropic && line.startsWith('event:')) {
-          anthropicEvent = line.slice(6).trim();
-          continue;
-        }
+          const rawLine = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 1);
 
-        const payload = line.startsWith('data:') ? line.slice(5).trim() : line;
-        if (!payload) continue;
-        if (payload === '[DONE]') return cleanModelTextOutput(fullText);
+          const line = rawLine.trim();
+          if (!line) {
+            anthropicEvent = '';
+            continue;
+          }
 
-        let json: unknown;
-        try {
-          json = JSON.parse(payload);
-        } catch {
-          continue;
-        }
+          if (isAnthropic && line.startsWith('event:')) {
+            anthropicEvent = line.slice(6).trim();
+            continue;
+          }
 
-        if (isAnthropic) {
-          const anthropicPayload = json as Record<string, any>;
-          const deltaText =
-            (anthropicEvent === 'content_block_delta' &&
-              anthropicPayload?.delta?.type === 'text_delta' &&
-              typeof anthropicPayload?.delta?.text === 'string'
-              ? anthropicPayload.delta.text
-              : undefined) ||
-            (anthropicEvent === 'content_block_start' &&
-            anthropicPayload?.content_block?.type === 'text' &&
-            typeof anthropicPayload?.content_block?.text === 'string'
-              ? anthropicPayload.content_block.text
-              : undefined);
+          const payload = line.startsWith('data:') ? line.slice(5).trim() : line;
+          if (!payload) continue;
+          if (payload === '[DONE]') return cleanModelTextOutput(fullText);
 
-          if (deltaText) {
-            fullText += deltaText;
+          let json: unknown;
+          try {
+            json = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+
+          if (isAnthropic) {
+            const anthropicPayload = json as Record<string, any>;
+            const deltaText =
+              (anthropicEvent === 'content_block_delta' &&
+                anthropicPayload?.delta?.type === 'text_delta' &&
+                typeof anthropicPayload?.delta?.text === 'string'
+                ? anthropicPayload.delta.text
+                : undefined) ||
+              (anthropicEvent === 'content_block_start' &&
+              anthropicPayload?.content_block?.type === 'text' &&
+              typeof anthropicPayload?.content_block?.text === 'string'
+                ? anthropicPayload.content_block.text
+                : undefined);
+
+            if (deltaText) {
+              fullText += deltaText;
+              onText?.(fullText);
+              continue;
+            }
+
+            if (anthropicPayload?.type === 'message_stop') {
+              return cleanModelTextOutput(fullText);
+            }
+
+            const finalText = parseAnthropicText(anthropicPayload as AnthropicMessageResponse);
+            if (finalText) {
+              const suffix = appendCumulativeDelta(fullText, finalText);
+              if (suffix) {
+                fullText += suffix;
+                onText?.(fullText);
+              }
+            }
+            continue;
+          }
+
+          const { delta, full } = extractStreamDelta(json);
+          if (typeof delta === 'string' && delta) {
+            fullText += delta;
             onText?.(fullText);
             continue;
           }
 
-          if (anthropicPayload?.type === 'message_stop') {
-            return cleanModelTextOutput(fullText);
-          }
-
-          const finalText = parseAnthropicText(anthropicPayload as AnthropicMessageResponse);
-          if (finalText) {
-            const suffix = appendCumulativeDelta(fullText, finalText);
+          if (typeof full === 'string' && full) {
+            const suffix = appendCumulativeDelta(fullText, full);
             if (suffix) {
               fullText += suffix;
               onText?.(fullText);
             }
           }
-          continue;
-        }
-
-        const { delta, full } = extractStreamDelta(json);
-        if (typeof delta === 'string' && delta) {
-          fullText += delta;
-          onText?.(fullText);
-          continue;
-        }
-
-        if (typeof full === 'string' && full) {
-          const suffix = appendCumulativeDelta(fullText, full);
-          if (suffix) {
-            fullText += suffix;
-            onText?.(fullText);
-          }
         }
       }
+    } catch (error) {
+      try {
+        await reader.cancel(error instanceof Error ? error.message : 'stream timeout');
+      } catch {
+        // ignore cancel failures
+      }
+      throw error;
     }
 
     const trailing = buffer.trim();
@@ -1345,76 +1418,77 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
 
     onUpdate?.([...responses]);
 
-    for (let index = 0; index < models.length; index += 1) {
-      const model = models[index];
-      const attemptChain = [
-        { id: model.id, name: model.name },
-        ...(model.fallbacks || []),
-      ].filter(
-        (candidate, candidateIndex, list) =>
-          candidate.id &&
-          list.findIndex((item) => item.id === candidate.id) === candidateIndex,
-      );
-      const attemptErrors: string[] = [];
+    await Promise.all(
+      models.map(async (model, index) => {
+        const attemptChain = [
+          { id: model.id, name: model.name },
+          ...(model.fallbacks || []),
+        ].filter(
+          (candidate, candidateIndex, list) =>
+            candidate.id &&
+            list.findIndex((item) => item.id === candidate.id) === candidateIndex,
+        );
+        const attemptErrors: string[] = [];
 
-      try {
-        let text = '';
-        let actualModel = model.id;
+        try {
+          let text = '';
+          let actualModel = model.id;
 
-        for (const candidate of attemptChain) {
-          try {
-            text = await chatCompletionsStream({
-              model: candidate.id,
-              messages: messages || [{ role: 'user', content: prompt }],
-              systemPrompt: model.systemPrompt || globalSystemPrompt,
-              onText: (fullText) => {
-                responses[index] = {
-                  ...responses[index],
-                  text: fullText,
-                  loading: true,
-                  attemptedModels: attemptChain.map((item) => item.id),
-                  actualModel: candidate.id,
-                };
-                onUpdate?.([...responses]);
-              },
-            });
-            actualModel = candidate.id;
-            break;
-          } catch (error) {
-            attemptErrors.push(
-              `${candidate.id}: ${error instanceof Error ? error.message : String(error)}`,
-            );
+          for (const candidate of attemptChain) {
+            try {
+              text = await chatCompletionsStream({
+                model: candidate.id,
+                messages: messages || [{ role: 'user', content: prompt }],
+                systemPrompt: model.systemPrompt || globalSystemPrompt,
+                onText: (fullText) => {
+                  responses[index] = {
+                    ...responses[index],
+                    text: fullText,
+                    loading: true,
+                    attemptedModels: attemptChain.map((item) => item.id),
+                    actualModel: candidate.id,
+                  };
+                  onUpdate?.([...responses]);
+                },
+              });
+              actualModel = candidate.id;
+              break;
+            } catch (error) {
+              attemptErrors.push(
+                `${candidate.id}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
           }
+
+          if (!text) {
+            throw new Error(attemptErrors.join('；') || '未获得模型返回内容');
+          }
+
+          const warnings =
+            actualModel !== model.id
+              ? [`主模型 ${model.id} 不可用，已自动降级到 ${actualModel}。`]
+              : [];
+
+          responses[index] = {
+            ...responses[index],
+            text,
+            loading: false,
+            actualModel,
+            attemptedModels: attemptChain.map((item) => item.id),
+            warnings,
+          };
+        } catch (error) {
+          responses[index] = {
+            ...responses[index],
+            loading: false,
+            error: error instanceof Error ? error.message : String(error),
+            attemptedModels: attemptChain.map((item) => item.id),
+          };
         }
 
-        if (!text) {
-          throw new Error(attemptErrors.join('；') || '未获得模型返回内容');
-        }
-
-        const warnings =
-          actualModel !== model.id
-            ? [`主模型 ${model.id} 不可用，已自动降级到 ${actualModel}。`]
-            : [];
-
-        responses[index] = {
-          ...responses[index],
-          text,
-          loading: false,
-          actualModel,
-          attemptedModels: attemptChain.map((item) => item.id),
-          warnings,
-        };
-      } catch (error) {
-        responses[index] = {
-          ...responses[index],
-          loading: false,
-          error: error instanceof Error ? error.message : String(error),
-          attemptedModels: attemptChain.map((item) => item.id),
-        };
-      }
-
-      onUpdate?.([...responses]);
-    }
+        onUpdate?.([...responses]);
+      }),
+    );
 
     return responses;
   };

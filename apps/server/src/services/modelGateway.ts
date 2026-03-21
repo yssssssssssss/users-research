@@ -50,7 +50,8 @@ const NODE_MODEL_ROUTES = {
     createTextRoute('Doubao-Seed-2.0-pro', '豆包 Seed 2.0 Pro', ['GLM-5']),
   ],
   patternAnalyzer: [
-    createTextRoute('Kimi-K2.5', 'Kimi K2.5', ['GLM-5', 'Doubao-Seed-2.0-pro']),
+    createTextRoute('GLM-5', 'GLM-5', ['Doubao-Seed-2.0-pro', 'Kimi-K2.5']),
+    createTextRoute('Doubao-Seed-2.0-pro', '璞嗗寘 Seed 2.0 Pro', ['GLM-5', 'Kimi-K2.5']),
   ],
   judgmentSynthesizer: [
     createTextRoute('GLM-5', 'GLM-5', ['Doubao-Seed-2.0-pro', 'Kimi-K2.5']),

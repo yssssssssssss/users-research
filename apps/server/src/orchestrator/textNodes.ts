@@ -51,6 +51,74 @@ const safeParseJson = <T>(raw: string): T | null => {
   }
 };
 
+const clipText = (value: string | undefined, maxLength: number): string => {
+  const normalized = (value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+};
+
+const compactBulletLines = (
+  items: Array<string | undefined>,
+  options: {
+    maxItems: number;
+    maxItemLength: number;
+    emptyText?: string;
+  },
+): string => {
+  const lines = items
+    .map((item) => clipText(item, options.maxItemLength))
+    .filter(Boolean)
+    .slice(0, options.maxItems);
+
+  if (!lines.length) {
+    return options.emptyText || '- 无';
+  }
+
+  return lines.map((item) => `- ${item}`).join('\n');
+};
+
+const buildWeakVisionFallback = (state: ResearchTaskState): VisionFinding[] => {
+  const querySummary = clipText(state.originalQuery, 72) || '当前方案';
+  const firstSubQuestion = clipText(state.subQuestions[0]?.text, 48);
+
+  return [
+    {
+      id: uid('vf'),
+      findingType: 'visual_hierarchy',
+      riskLevel: 'medium',
+      content: `弱视觉推断：若“${querySummary}”需要同时承载导购与转化目标，首屏信息层级容易分散。`,
+      regionRef: {
+        inferenceMode: 'text_only',
+        basedOn: firstSubQuestion || querySummary,
+      },
+      isConflict: true,
+    },
+    {
+      id: uid('vf'),
+      findingType: 'cognitive_load',
+      riskLevel: 'medium',
+      content:
+        '弱视觉推断：在缺少真实界面截图时，应优先控制首屏模块数量与文案密度，避免用户先理解内容、后理解行动路径。',
+      regionRef: {
+        inferenceMode: 'text_only',
+      },
+      isConflict: true,
+    },
+    {
+      id: uid('vf'),
+      findingType: 'cta_visibility',
+      riskLevel: 'low',
+      content:
+        '弱视觉推断：建议保证主 CTA 在内容模块附近仍具备清晰对比和稳定位置，否则内容消费可能稀释主操作意图。',
+      regionRef: {
+        inferenceMode: 'text_only',
+      },
+      isConflict: true,
+    },
+  ];
+};
+
 const riskScore: Record<'low' | 'medium' | 'high', number> = {
   low: 1,
   medium: 2,
@@ -295,10 +363,11 @@ export const executeProblemDecomposer = async (
     '你只能输出 JSON，不要输出任何额外解释。',
     '请将用户问题拆成 2 到 4 个可研究的子问题。',
     '每个子问题必须包含 text、audience、scenario、journeyPath、decisionPoint 字段。',
+    '优先保留研究价值最高的问题，避免复述原问题。',
   ].join('\n');
 
   const prompt = [
-    `用户问题：${state.originalQuery}`,
+    `用户问题：${clipText(state.originalQuery, 420)}`,
     `任务模式：${state.taskMode}`,
     '请输出 JSON：{"subQuestions":[{"text":"","audience":"","scenario":"","journeyPath":"","decisionPoint":""}]}',
   ].join('\n');
@@ -367,7 +436,10 @@ export const executeVisionMoE = async (
     .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     .slice(0, 3);
   const subQuestionSummary = state.subQuestions.length
-    ? state.subQuestions.map((item) => `- ${item.text}`).join('\n')
+    ? compactBulletLines(
+        state.subQuestions.map((item) => item.text),
+        { maxItems: 3, maxItemLength: 88 },
+      )
     : '- 暂无子问题';
   const warnings: string[] = [];
 
@@ -375,6 +447,16 @@ export const executeVisionMoE = async (
     warnings.push('未提供设计图或截图输入，Vision MoE 当前仅能基于问题描述做弱视觉推断。');
   } else if (!imageUrls.length) {
     warnings.push('已提供设计输入条目，但缺少可直接发送给模型的 sourceUrl / ossKey，当前仍使用文本引用推断。');
+  }
+
+  if (!imageUrls.length) {
+    return {
+      visionFindings: buildWeakVisionFallback(state),
+      warnings: [
+        ...warnings,
+        'Vision MoE 已跳过高成本多模型分析，改为文本启发式弱视觉推断；结果仅用于提示风险，不代表真实界面审查结论。',
+      ],
+    };
   }
 
   const systemPrompt = [
@@ -386,12 +468,12 @@ export const executeVisionMoE = async (
   ].join('\n');
 
   const prompt = [
-    `原始问题：${state.originalQuery}`,
+    `原始问题：${clipText(state.originalQuery, 420)}`,
     `任务模式：${state.taskMode}`,
     `子问题：\n${subQuestionSummary}`,
     `设计输入：\n${
       designRefs.length
-        ? designRefs.map((item) => `- ${item}`).join('\n')
+        ? compactBulletLines(designRefs, { maxItems: 3, maxItemLength: 120 })
         : '- 未提供设计图，仅可做弱视觉判断'
     }`,
   ].join('\n\n');
@@ -563,7 +645,10 @@ export const executeExternalSearch = async (
     };
   }
 
-  const subQuestionSummary = state.subQuestions.map((item) => `- ${item.text}`).join('\n') || '- 无';
+  const subQuestionSummary = compactBulletLines(
+    state.subQuestions.map((item) => item.text),
+    { maxItems: 3, maxItemLength: 84 },
+  );
   const systemPrompt = [
     '你是 AI 用研系统中的 externalSearch 证据补全节点。',
     '你的任务不是伪造已验证事实，而是生成“待核查的外部检索线索”。',
@@ -571,10 +656,11 @@ export const executeExternalSearch = async (
     '每条线索必须包含 sourceType、sourceName、searchQuery、tentativeClaim、citationText。',
     '所有输出都应被视为 T3 待核查线索，不能伪造具体 URL、页码或真实研究结论。',
     '输出格式：{"items":[{"sourceType":"web_article","sourceName":"","searchQuery":"","tentativeClaim":"","citationText":""}]}',
+    '尽量压缩表述，只保留最关键的 2 到 3 条检索线索。',
   ].join('\n');
 
   const prompt = [
-    `原始问题：${state.originalQuery}`,
+    `原始问题：${clipText(state.originalQuery, 360)}`,
     `任务模式：${state.taskMode}`,
     `子问题：\n${subQuestionSummary}`,
     '请生成 2 到 3 条外部检索线索，用于后续人工或系统补检。',
@@ -655,10 +741,14 @@ export const executePersonaSandbox = async (
   ] as const;
 
   const models = modelGateway.getPersonaTextModels();
-  const subQuestionSummary = state.subQuestions.map((item) => `- ${item.text}`).join('\n') || '- 无';
-  const visionSummary =
-    state.visionFindings.map((item) => `- [${item.findingType}/${item.riskLevel}] ${item.content}`).join('\n') ||
-    '- 无';
+  const subQuestionSummary = compactBulletLines(
+    state.subQuestions.map((item) => item.text),
+    { maxItems: 3, maxItemLength: 80 },
+  );
+  const visionSummary = compactBulletLines(
+    state.visionFindings.map((item) => `[${item.findingType}/${item.riskLevel}] ${item.content}`),
+    { maxItems: 3, maxItemLength: 96 },
+  );
   const warnings: string[] = [];
   const findings: PersonaFinding[] = [];
 
@@ -674,7 +764,7 @@ export const executePersonaSandbox = async (
     ].join('\n');
 
     const prompt = [
-      `原始问题：${state.originalQuery}`,
+      `原始问题：${clipText(state.originalQuery, 280)}`,
       `任务模式：${state.taskMode}`,
       `子问题：\n${subQuestionSummary}`,
       `Vision 观察：\n${visionSummary}`,
@@ -750,22 +840,29 @@ export const executeJudgmentSynthesizer = async (
   rawJudgments?: JudgmentPayload;
 }> => {
   const evidenceSummary = state.evidencePool
-    .map((item, index) => `${index + 1}. [${item.tier}/${item.sourceLevel}] ${item.content}`)
+    .slice(0, 6)
+    .map(
+      (item, index) =>
+        `${index + 1}. [${item.tier}/${item.sourceLevel}] ${clipText(item.content, 120)}`,
+    )
     .join('\n');
-  const subQuestionSummary = state.subQuestions
-    .map((item) => `- ${item.text}`)
-    .join('\n');
-  const visionSummary = state.visionFindings
-    .slice(0, 4)
-    .map((item) => `- [${item.findingType}/${item.riskLevel}] ${item.content}`)
-    .join('\n');
+  const subQuestionSummary = compactBulletLines(
+    state.subQuestions.map((item) => item.text),
+    { maxItems: 4, maxItemLength: 96 },
+  );
+  const visionSummary = compactBulletLines(
+    state.visionFindings
+      .slice(0, 4)
+      .map((item) => `[${item.findingType}/${item.riskLevel}] ${item.content}`),
+    { maxItems: 4, maxItemLength: 110 },
+  );
   const personaSummary = state.personaFindings
     .slice(0, 4)
-    .map((item) => `- [${item.personaName}/${item.stance || 'mixed'}] ${item.content}`)
+    .map((item) => `- [${item.personaName}/${item.stance || 'mixed'}] ${clipText(item.content, 110)}`)
     .join('\n');
   const frameworkSummary = getExperienceModelReportLines(state.evidencePool)
     .slice(0, 3)
-    .map((item) => `- ${item.replace(/\n/g, '\n  ')}`)
+    .map((item) => `- ${clipText(item.replace(/\n/g, ' / '), 150)}`)
     .join('\n');
   const reviewNotes: string[] = [];
 
@@ -804,7 +901,7 @@ export const executeJudgmentSynthesizer = async (
   ].join('\n');
 
   const prompt = [
-    `原始问题：${state.originalQuery}`,
+    `原始问题：${clipText(state.originalQuery, 360)}`,
     `子问题：\n${subQuestionSummary}`,
     `证据摘要：\n${evidenceSummary}`,
     `体验模型视角：\n${frameworkSummary || '- 无'}`,
@@ -812,6 +909,21 @@ export const executeJudgmentSynthesizer = async (
     `Persona Sandbox：\n${personaSummary || '- 无'}`,
     '请输出 JSON：{"rqLevel":"RQ2","judgments":[{"title":"","content":"","confidence":"medium","risk":""}],"nextActions":[""]}',
   ].join('\n\n');
+
+  const reviewPromise = state.enabledModules.multiModelReview
+    ? withNodeTimeout(
+        'Judgment Review',
+        modelGateway.runTextMultiModel({
+          prompt,
+          globalSystemPrompt: systemPrompt,
+        }),
+        25000,
+      )
+        .then((review) => ({ review }))
+        .catch((error) => ({
+          error: error instanceof Error ? error.message : String(error),
+        }))
+    : undefined;
 
   try {
     const raw = await withNodeTimeout(
@@ -824,26 +936,21 @@ export const executeJudgmentSynthesizer = async (
       throw new Error('Judgment Synthesizer 返回结构不完整');
     }
 
-    if (state.enabledModules.multiModelReview) {
+    if (reviewPromise) {
       try {
-        const review = await withNodeTimeout(
-          'Judgment Review',
-          modelGateway.runTextMultiModel({
-            prompt,
-            globalSystemPrompt: systemPrompt,
-          }),
-          45000,
-        );
-        const reviewSummary = review
-          .map((item) =>
-            item.error ? `${item.model} 失败：${item.error}` : `${item.model} 已返回复核结论`,
-          )
-          .join('；');
-        reviewNotes.push(reviewSummary);
+        const reviewResult = await reviewPromise;
+        if ('error' in reviewResult) {
+          reviewNotes.push(`多模型复核失败：${reviewResult.error}`);
+        } else {
+          const reviewSummary = reviewResult.review
+            .map((item) =>
+              item.error ? `${item.model} 失败：${item.error}` : `${item.model} 已返回复核结论`,
+            )
+            .join('；');
+          reviewNotes.push(reviewSummary);
+        }
       } catch (error) {
-        reviewNotes.push(
-          `多模型复核失败：${error instanceof Error ? error.message : String(error)}`,
-        );
+        reviewNotes.push(`多模型复核失败：${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
