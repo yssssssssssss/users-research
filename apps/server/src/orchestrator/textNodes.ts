@@ -892,7 +892,12 @@ export const executeJudgmentSynthesizer = async (
   }
 };
 
-export const enrichTaskForRun = async (task: ResearchTaskState): Promise<ResearchTaskState> => {
+export const enrichTaskForRun = async (
+  task: ResearchTaskState,
+  options?: {
+    onCheckpoint?: (state: ResearchTaskState) => Promise<void> | void;
+  },
+): Promise<ResearchTaskState> => {
   const problemResult = await executeProblemDecomposer(task);
   const experienceModelState: ResearchTaskState = {
     ...task,
@@ -905,6 +910,7 @@ export const enrichTaskForRun = async (task: ResearchTaskState): Promise<Researc
       warnings: [...task.runStats.warnings, ...problemResult.warnings],
     },
   };
+  await options?.onCheckpoint?.(experienceModelState);
   const experienceModelResult = await executeExperienceModelAnalysis(experienceModelState);
   const baseEvidencePool = [...buildMockEvidence(), ...experienceModelResult.evidenceItems];
   const externalState: ResearchTaskState = {
@@ -922,6 +928,7 @@ export const enrichTaskForRun = async (task: ResearchTaskState): Promise<Researc
       ],
     },
   };
+  await options?.onCheckpoint?.(externalState);
   const externalSearchResult = await executeExternalSearch(externalState);
   const evidencePool = [...baseEvidencePool, ...externalSearchResult.evidenceItems];
   const evidenceConflicts =
@@ -948,6 +955,7 @@ export const enrichTaskForRun = async (task: ResearchTaskState): Promise<Researc
       warnings: [...externalState.runStats.warnings, ...externalSearchResult.warnings],
     },
   };
+  await options?.onCheckpoint?.(visionState);
 
   const visionResult = await executeVisionMoE(visionState);
   const personaState: ResearchTaskState = {
@@ -959,6 +967,7 @@ export const enrichTaskForRun = async (task: ResearchTaskState): Promise<Researc
       warnings: [...visionState.runStats.warnings, ...visionResult.warnings],
     },
   };
+  await options?.onCheckpoint?.(personaState);
   const personaResult = await executePersonaSandbox(personaState);
 
   const synthesisState: ResearchTaskState = {
@@ -970,6 +979,7 @@ export const enrichTaskForRun = async (task: ResearchTaskState): Promise<Researc
       warnings: [...personaState.runStats.warnings, ...personaResult.warnings],
     },
   };
+  await options?.onCheckpoint?.(synthesisState);
 
   const judgmentResult = await executeJudgmentSynthesizer(synthesisState);
   const finishedAt = new Date().toISOString();

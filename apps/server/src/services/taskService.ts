@@ -687,6 +687,9 @@ const saveTaskToMemory = (task: ResearchTaskState): ResearchTaskState => {
   return task;
 };
 
+const persistRuntimeState = async (state: ResearchTaskState): Promise<ResearchTaskState> =>
+  shouldUseDb() ? persistStateToDb(state) : saveTaskToMemory(state);
+
 const loadTaskFromDb = async (taskId: string): Promise<ResearchTaskState> => {
   const prisma = getPrismaClient();
   const task = await prisma.researchTask.findUnique({
@@ -978,10 +981,14 @@ export const runTask = async (taskId: string): Promise<ResearchTaskState> => {
     },
   };
 
-  const taskAfterStart = shouldUseDb() ? await persistStateToDb(runningTask) : saveTaskToMemory(runningTask);
-  const completedTask = await enrichTaskForRun(taskAfterStart);
+  const taskAfterStart = await persistRuntimeState(runningTask);
+  const completedTask = await enrichTaskForRun(taskAfterStart, {
+    onCheckpoint: async (checkpoint) => {
+      await persistRuntimeState(checkpoint);
+    },
+  });
   const gatedCompletedTask = await recomputeTaskJudgment(completedTask, 'run');
-  return shouldUseDb() ? persistStateToDb(gatedCompletedTask) : saveTaskToMemory(gatedCompletedTask);
+  return persistRuntimeState(gatedCompletedTask);
 };
 
 export const enqueueTaskRun = (taskId: string): Promise<ResearchTaskState> => {
