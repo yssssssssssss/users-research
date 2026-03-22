@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 可迁移的多模型客户端封装
  *
  * 适用场景：
@@ -282,8 +282,8 @@ const getFetch = (config?: ModelClientConfig): typeof fetch => {
   return fetchImpl.bind(globalThis);
 };
 
-const DEFAULT_TEXT_TIMEOUT_MS = 30000;
-const DEFAULT_STREAM_TIMEOUT_MS = 45000;
+const DEFAULT_TEXT_TIMEOUT_MS = 60000;
+const DEFAULT_STREAM_TIMEOUT_MS = 90000;
 
 const fetchWithTimeout = async (
   fetchImpl: typeof fetch,

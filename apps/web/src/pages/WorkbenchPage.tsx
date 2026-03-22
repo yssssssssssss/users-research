@@ -1,13 +1,21 @@
-﻿import { Alert, Button, Card, Col, Descriptions, Empty, List, Row, Space, Statistic, Tag, Typography } from 'antd';
+import { Button, Card, Col, Descriptions, Empty, List, Row, Space, Statistic, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ResearchTaskState, TaskSummaryResponse } from '@users-research/shared';
 import { ExperienceModelPanel } from '../components/ExperienceModelPanel';
 import { OutputPreviewCard } from '../components/OutputPreviewCard';
 import { api } from '../lib/api';
+import {
+  TASK_DETAIL_EVIDENCE_PATH,
+  TASK_DETAIL_PERSONA_PATH,
+  TASK_DETAIL_REPORT_PATH,
+  TASK_DETAIL_RESULT_PATH,
+  TASK_DETAIL_VISION_PATH,
+} from '../lib/navigation';
 import { useTaskStore } from '../store/taskStore';
 
-const { Title } = Typography;
+const { Title, Paragraph } = Typography;
+const MAX_EVENT_COUNT = 20;
 
 export const WorkbenchPage = () => {
   const navigate = useNavigate();
@@ -20,7 +28,16 @@ export const WorkbenchPage = () => {
   const [events, setEvents] = useState<string[]>([]);
 
   const appendEvent = useCallback((message: string) => {
-    setEvents((prev) => [...prev.slice(-19), message]);
+    const normalized = message.trim();
+    if (!normalized) return;
+
+    setEvents((prev) => {
+      if (prev[prev.length - 1] === normalized) {
+        return prev;
+      }
+
+      return [...prev.slice(-(MAX_EVENT_COUNT - 1)), normalized];
+    });
   }, []);
 
   const loadTaskContext = useCallback(async () => {
@@ -45,11 +62,15 @@ export const WorkbenchPage = () => {
     eventSource.onopen = () => {
       appendEvent('实时流已连接');
     };
-    eventSource.onmessage = (event) => {
-      appendEvent(event.data);
-    };
     eventSource.addEventListener('connected', (event) => {
-      appendEvent(`已接入任务流：${(event as MessageEvent).data}`);
+      try {
+        const payload = JSON.parse((event as MessageEvent).data) as {
+          taskId?: string;
+        };
+        appendEvent(`已接入任务流：${payload.taskId || currentTaskId}`);
+      } catch {
+        appendEvent('已接入任务流');
+      }
     });
     eventSource.addEventListener('task_status', (event) => {
       try {
@@ -73,7 +94,17 @@ export const WorkbenchPage = () => {
       }
     });
     eventSource.addEventListener('task_complete', (event) => {
-      appendEvent(`任务已进入终态：${(event as MessageEvent).data}`);
+      try {
+        const payload = JSON.parse((event as MessageEvent).data) as {
+          status?: string;
+          reviewStatus?: string;
+        };
+        appendEvent(
+          `任务已进入终态：${payload.status || 'unknown'} / ${payload.reviewStatus || 'unknown'}`,
+        );
+      } catch {
+        appendEvent('任务已进入终态');
+      }
       eventSource.close();
     });
     eventSource.onerror = () => {
@@ -93,7 +124,12 @@ export const WorkbenchPage = () => {
 
   return (
     <Space direction="vertical" size={24} style={{ width: '100%' }}>
-      <Title level={2}>任务工作台</Title>
+      <div>
+        <Title level={3} style={{ marginBottom: 8 }}>任务总览</Title>
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          查看该任务进度、实时事件、启用模块和候选输出，作为进入各分析视图的总入口。
+        </Paragraph>
+      </div>
 
       <div className="metric-grid">
         <Card><Statistic title="任务状态" value={taskSummary.status} /></Card>
@@ -101,14 +137,6 @@ export const WorkbenchPage = () => {
         <Card><Statistic title="预计成本" value={taskSummary.stats.costEstimate || 0} suffix="元" /></Card>
         <Card><Statistic title="当前节点" value={taskSummary.currentNode || '未开始'} /></Card>
       </div>
-
-      {taskSummary.stats.warnings.length > 0 && (
-        <Alert
-          type="warning"
-          message="任务存在门禁提醒"
-          description={taskSummary.stats.warnings.join('；')}
-        />
-      )}
 
       <Row gutter={16}>
         <Col span={10}>
@@ -135,11 +163,11 @@ export const WorkbenchPage = () => {
 
       <Card title="快速入口" className="page-card">
         <Space wrap>
-          <Button><Link to="/evidence">查看证据看板</Link></Button>
-          <Button><Link to="/vision">查看 Vision Lab</Link></Button>
-          <Button><Link to="/persona">查看 Persona Lab</Link></Button>
-          <Button><Link to="/result">查看结果总览</Link></Button>
-          <Button type="primary"><Link to="/report">生成/查看报告</Link></Button>
+          <Button><Link to={TASK_DETAIL_EVIDENCE_PATH(currentTaskId)}>查看证据看板</Link></Button>
+          <Button><Link to={TASK_DETAIL_VISION_PATH(currentTaskId)}>查看 Vision Lab</Link></Button>
+          <Button><Link to={TASK_DETAIL_PERSONA_PATH(currentTaskId)}>查看 Persona Lab</Link></Button>
+          <Button><Link to={TASK_DETAIL_RESULT_PATH(currentTaskId)}>查看结果总览</Link></Button>
+          <Button type="primary"><Link to={TASK_DETAIL_REPORT_PATH(currentTaskId)}>生成/查看报告</Link></Button>
         </Space>
       </Card>
 
@@ -174,7 +202,7 @@ export const WorkbenchPage = () => {
                       type="link"
                       onClick={() => {
                         setSelectedOutput(output);
-                        navigate('/result');
+                        navigate(TASK_DETAIL_RESULT_PATH(currentTaskId));
                       }}
                     >
                       查看结果总览
@@ -183,7 +211,7 @@ export const WorkbenchPage = () => {
                       type="link"
                       onClick={() => {
                         setSelectedOutput(output);
-                        navigate('/report');
+                        navigate(TASK_DETAIL_REPORT_PATH(currentTaskId));
                       }}
                     >
                       用此输出生成报告

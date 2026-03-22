@@ -1,6 +1,7 @@
-﻿import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import { DEFAULT_IMAGE_MODELS, DEFAULT_TEXT_MODELS } from '@users-research/model-clients';
-import { listExperienceModelCatalog } from '../services/experienceModelService';
+import { listExperienceModelCatalog } from '../services/experienceModelService.js';
+import { getObservabilitySummary } from '../services/taskService.js';
 
 export const systemRoutes: FastifyPluginAsync = async (app) => {
   app.get('/system/models', async () => ({
@@ -18,10 +19,5 @@ export const systemRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/system/experience-models', async () => listExperienceModelCatalog());
 
-  app.get('/system/observability/summary', async () => ({
-    totalTasks: 0,
-    avgLatencyMs: 0,
-    avgCost: 0,
-    degradeCount: 0,
-  }));
+  app.get('/system/observability/summary', async () => getObservabilitySummary());
 };

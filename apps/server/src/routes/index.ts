@@ -1,8 +1,8 @@
-﻿import type { FastifyPluginAsync } from 'fastify';
-import { taskRoutes } from './tasks';
-import { evidenceRoutes } from './evidence';
-import { reportRoutes } from './reports';
-import { systemRoutes } from './system';
+import type { FastifyPluginAsync } from 'fastify';
+import { taskRoutes } from './tasks.js';
+import { evidenceRoutes } from './evidence.js';
+import { reportRoutes } from './reports.js';
+import { systemRoutes } from './system.js';
 
 export const apiRoutes: FastifyPluginAsync = async (app) => {
   app.get('/health', async () => ({ status: 'ok' }));

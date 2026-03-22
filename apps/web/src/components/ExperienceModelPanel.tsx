@@ -101,7 +101,7 @@ export const ExperienceModelPanel = ({
               mode="multiple"
               allowClear
               style={{ width: '100%' }}
-              placeholder="选择要用于当前任务的体验模型"
+              placeholder="选择要用于该任务的体验模型"
               options={catalog.map((item) => ({
                 label: `${item.name}｜${item.dimensions.join(' / ')}`,
                 value: item.id,
@@ -219,7 +219,7 @@ export const ExperienceModelPanel = ({
         ) : (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="当前任务尚未产出体验模型推荐"
+            description="该任务尚未产出体验模型推荐"
           />
         )}
       </Space>

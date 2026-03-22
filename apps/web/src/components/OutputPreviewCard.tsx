@@ -1,6 +1,7 @@
 ﻿import type { ReactNode } from 'react';
-import { Card, Descriptions, Empty, List, Space, Tag, Typography } from 'antd';
+import { Alert, Card, Descriptions, Empty, List, Space, Tag, Typography } from 'antd';
 import type { CandidateOutput } from '@users-research/shared';
+import type { ProvenanceTag } from '../lib/provenance';
 
 const { Paragraph, Text } = Typography;
 
@@ -71,9 +72,16 @@ const statusColorMap: Record<string, string> = {
 interface OutputPreviewCardProps {
   output: CandidateOutput;
   extra?: ReactNode;
+  provenanceTags?: ProvenanceTag[];
+  fallbackWarnings?: string[];
 }
 
-export const OutputPreviewCard = ({ output, extra }: OutputPreviewCardProps) => {
+export const OutputPreviewCard = ({
+  output,
+  extra,
+  provenanceTags,
+  fallbackWarnings,
+}: OutputPreviewCardProps) => {
   const content = asRecord(output.contentJson);
   const judgments = asJudgments(content?.judgments);
   const nextActions = asStringArray(content?.nextActions);
@@ -94,6 +102,30 @@ export const OutputPreviewCard = ({ output, extra }: OutputPreviewCardProps) => 
         </Space>
 
         {output.summary ? <Paragraph style={{ marginBottom: 0 }}>{output.summary}</Paragraph> : null}
+
+        {fallbackWarnings?.length ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="检测到 fallback / mock / 弱视觉推断信号"
+            description={fallbackWarnings.slice(0, 3).join('；')}
+          />
+        ) : null}
+
+        {provenanceTags?.length ? (
+          <div>
+            <Text strong>真实性边界</Text>
+            <div style={{ marginTop: 8 }}>
+              <Space wrap>
+                {provenanceTags.map((item) => (
+                  <Tag key={item.key} color={item.color}>
+                    {item.label}
+                  </Tag>
+                ))}
+              </Space>
+            </div>
+          </div>
+        ) : null}
 
         {output.gateNotes?.length ? (
           <div>

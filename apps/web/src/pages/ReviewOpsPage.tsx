@@ -1,4 +1,4 @@
-﻿import { Alert, Button, Card, Col, Empty, Row, Space, Statistic, Table, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Empty, Row, Space, Statistic, Table, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useTaskStore } from '../store/taskStore';
@@ -59,8 +59,8 @@ export const ReviewOpsPage = () => {
 
   return (
     <div>
-      <Title level={2}>审核与观测</Title>
-      <Paragraph>本页用于承载待审报告、审核状态、模型成本与降级治理信息。</Paragraph>
+      <Title level={3}>审核与观测</Title>
+      <Paragraph>本页用于承载该任务的待审报告、审核状态、模型成本与降级治理信息。</Paragraph>
       <Row gutter={16}>
         <Col span={6}><Card><Statistic title="待审报告" value={pendingCount} /></Card></Col>
         <Col span={6}><Card><Statistic title="平均耗时" value={taskSummary?.stats.elapsedSeconds || 0} suffix="s" /></Card></Col>

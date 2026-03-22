@@ -6,7 +6,7 @@ import {
   type ModelOption,
   type TextModelRoute,
 } from '@users-research/model-clients';
-import { appConfig } from '../config/env';
+import { appConfig } from '../config/env.js';
 
 let clientsSingleton: ModelClients | null = null;
 
@@ -159,7 +159,7 @@ const toTextRoutes = (routes: readonly TextModelRoute[]): TextModelRoute[] =>
 
 export const modelGateway = {
   isTextModelEnabled: (): boolean =>
-    Boolean(appConfig.models.textApiUrl && appConfig.models.textApiKey),
+    !appConfig.models.disabled && Boolean(appConfig.models.textApiUrl && appConfig.models.textApiKey),
 
   getProblemDecomposerModels: (): ModelOption[] =>
     toModelOptions(NODE_MODEL_ROUTES.problemDecomposer),

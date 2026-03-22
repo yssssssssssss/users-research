@@ -1,4 +1,4 @@
-﻿import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -15,8 +15,9 @@ import {
 } from 'antd';
 import type { CreateTaskFileInput } from '@users-research/shared';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { TASK_DETAIL_OVERVIEW_PATH, TASK_HISTORY_PATH } from '../lib/navigation';
 import { useTaskStore } from '../store/taskStore';
 
 const { Title, Paragraph, Text } = Typography;
@@ -86,7 +87,7 @@ export const CreateTaskPage = () => {
         },
       });
 
-      navigate('/workbench');
+      navigate(TASK_DETAIL_OVERVIEW_PATH(created.taskId));
       message.success(`任务已创建，预计 ${preview.predictedPlan.estimatedLatencySeconds} 秒完成首轮分析。`);
 
       void api.runTask(created.taskId).catch((error) => {
@@ -100,16 +101,19 @@ export const CreateTaskPage = () => {
   return (
     <Space direction="vertical" size={24} style={{ width: '100%' }}>
       <div>
-        <Title level={2}>新建分析任务</Title>
+        <Title level={2}>新建任务</Title>
         <Paragraph>
-          先输入研究问题，再选择是否开启 Vision MoE、Persona Sandbox、外部检索和多模型复核。
+          这里只做一件事：创建新任务。若你要继续旧任务，请回到历史任务列表。
         </Paragraph>
+        <Button>
+          <Link to={TASK_HISTORY_PATH}>返回历史任务</Link>
+        </Button>
       </div>
 
       <Alert
         type="info"
         message="当前为 Phase 1 骨架版"
-        description="已接通任务状态、证据、Vision、Persona、报告的页面与 API 结构；当前支持手工录入设计图/截图 URL 或 data URL，供 Vision MoE 走多模态分析。"
+        description="已接通任务状态、证据、Vision、Persona、报告页面与 SQLite 本地持久化。当前页面只保留新建流程，历史任务已迁移到左侧独立入口。"
       />
 
       <Card className="page-card">
@@ -272,7 +276,7 @@ export const CreateTaskPage = () => {
               <Text>• 默认走完整研究工作台链路</Text>
               <Text>• 输出结果需经过 Gate</Text>
               <Text>• Vision / Persona 结果默认降权，不直接视为 T1 事实</Text>
-              <Text>• 当前若模型端支持 `image_url`，Vision MoE 会优先尝试真图输入</Text>
+              <Text>• 当前若模型端支持 image_url，Vision MoE 会优先尝试真图输入</Text>
             </Space>
           </Card>
 

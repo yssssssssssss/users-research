@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 ﻿import type {
   CandidateOutput,
   EvidenceItem,
@@ -8,19 +9,21 @@
   VisionFinding,
 } from '@users-research/shared';
 import type { ChatMessage } from '@users-research/model-clients';
-import { modelGateway } from '../services/modelGateway';
+import { modelGateway } from '../services/modelGateway.js';
+import { appConfig } from '../config/env.js';
 import {
   analyzeExperienceModels,
   getExperienceModelReportLines,
-} from '../services/experienceModelService';
+} from '../services/experienceModelService.js';
+import { webSearch } from '../services/searchClient.js';
 import {
   buildMockCandidateOutputs,
   buildMockEvidence,
   buildMockPersonaFindings,
   buildMockVisionFindings,
-} from './index';
+} from './index.js';
 
-const uid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+const uid = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, '')}`;
 
 const computeLatencyMs = (startedAt?: string, finishedAt?: string): number | undefined => {
   if (!startedAt || !finishedAt) return undefined;
@@ -125,7 +128,7 @@ const riskScore: Record<'low' | 'medium' | 'high', number> = {
   high: 3,
 };
 
-const NODE_TIMEOUT_MS = 30000;
+const NODE_TIMEOUT_MS = 60000;
 
 const withNodeTimeout = async <T>(
   label: string,
@@ -194,6 +197,20 @@ interface ExternalSearchPayload {
   }>;
 }
 
+interface ExternalSearchSelectionPayload {
+  items: Array<{
+    url: string;
+    title: string;
+    snippet: string;
+    sourceType?: 'web_article' | 'industry_report' | 'historical_case';
+    publishedDate?: string;
+    relevanceScore?: number;
+    reason?: string;
+    searchQuery?: string;
+    engine?: 'tavily' | 'google_pse' | 'exa';
+  }>;
+}
+
 const buildFallbackSubQuestions = (query: string): SubQuestion[] => [
   {
     id: uid('sq'),
@@ -231,6 +248,21 @@ const buildFallbackExternalEvidence = (state: ResearchTaskState): EvidenceItem[]
     reviewStatus: 'downgraded',
   },
 ];
+
+const buildSeedEvidencePool = (): EvidenceItem[] => {
+  if (!appConfig.research.useMockEvidence) {
+    return [];
+  }
+
+  return buildMockEvidence().map((item) => ({
+    ...item,
+    traceLocation: {
+      ...(item.traceLocation || {}),
+      generatedBy: 'mock_seed_evidence',
+      fallbackMode: 'demo_only',
+    },
+  }));
+};
 
 const pickHigherRisk = (
   left: VisionFinding['riskLevel'],
@@ -680,21 +712,117 @@ export const executeExternalSearch = async (
       };
     }
 
-    return {
-      evidenceItems: parsed.items.slice(0, 3).map((item) => ({
-        id: uid('ev'),
+    const queryResults = await Promise.all(
+      parsed.items.slice(0, 3).map(async (item) => ({
+        query: item.searchQuery,
         sourceType: item.sourceType,
+        tentativeClaim: item.tentativeClaim,
+        sourceName: item.sourceName,
+        citationText: item.citationText,
+        results: await webSearch(item.searchQuery, { maxResults: 4 }),
+      })),
+    );
+
+    const flattenedResults = queryResults.flatMap((entry) =>
+      entry.results.map((result) => ({
+        ...result,
+        sourceType: entry.sourceType,
+        searchQuery: entry.query,
+        tentativeClaim: entry.tentativeClaim,
+        querySourceName: entry.sourceName,
+        queryCitationText: entry.citationText,
+      })),
+    );
+
+    if (!flattenedResults.length) {
+      return {
+        evidenceItems: buildFallbackExternalEvidence(state),
+        warnings: ['externalSearch 未从真实搜索引擎获得结果，已回退为待核查外部线索。'],
+      };
+    }
+
+    const selectionPrompt = [
+      `原始问题：${clipText(state.originalQuery, 320)}`,
+      `子问题：\n${subQuestionSummary}`,
+      '以下是真实搜索返回结果，请挑选最相关的 2 到 3 条，并输出 JSON：',
+      JSON.stringify(
+        flattenedResults.slice(0, 10).map((item) => ({
+          title: item.title,
+          url: item.url,
+          snippet: clipText(item.snippet, 280),
+          publishedDate: item.publishedDate,
+          relevanceScore: item.relevanceScore,
+          sourceType: item.sourceType,
+          searchQuery: item.searchQuery,
+          tentativeClaim: item.tentativeClaim,
+          engine: item.engine,
+        })),
+      ),
+      '输出格式：{"items":[{"url":"","title":"","snippet":"","sourceType":"web_article","publishedDate":"","relevanceScore":0.8,"reason":"","searchQuery":"","engine":"tavily"}]}',
+    ].join('\n\n');
+
+    let selectedItems: ExternalSearchSelectionPayload['items'] =
+      flattenedResults.slice(0, 3).map((item) => ({
+        url: item.url,
+        title: item.title,
+        snippet: item.snippet,
+        sourceType: item.sourceType,
+        publishedDate: item.publishedDate,
+        relevanceScore: item.relevanceScore,
+        reason: item.tentativeClaim,
+        searchQuery: item.searchQuery,
+        engine: item.engine,
+      }));
+
+    try {
+      const selectionRaw = await withNodeTimeout(
+        'External Search Selector',
+        modelGateway.runPatternAnalyzer({
+          systemPrompt: [
+            '你是 AI 用研系统中的外部证据筛选节点。',
+            '你拿到的是真实搜索返回结果，但仍然只能输出待核查外部证据，不得夸大为已验证事实。',
+            '请优先保留最相关、最可追溯的 2 到 3 条结果。',
+            '只能输出 JSON，不要输出解释。',
+          ].join('\n'),
+          prompt: selectionPrompt,
+        }),
+      );
+      const selected = safeParseJson<ExternalSearchSelectionPayload>(selectionRaw);
+      if (selected?.items?.length) {
+        selectedItems = selected.items
+          .filter((item) => item.url && item.title && item.snippet)
+          .slice(0, 3);
+      }
+    } catch {
+      // 筛选失败时保留默认 top results。
+    }
+
+    return {
+      evidenceItems: selectedItems.map((item, index) => ({
+        id: uid('ev'),
+        sourceType: item.sourceType || 'web_article',
         sourceLevel: 'external',
         tier: 'T3',
-        confidenceScore: 0.35,
-        sourceName: item.sourceName,
-        content: `待核查外部线索：${item.tentativeClaim}`,
-        citationText: item.citationText || `建议检索：${item.searchQuery}`,
-        traceLocation: { searchQuery: item.searchQuery, generatedBy: 'external_search' },
+        confidenceScore:
+          typeof item.relevanceScore === 'number'
+            ? Math.max(0.2, Math.min(0.75, item.relevanceScore))
+            : 0.48,
+        sourceName: item.title,
+        sourceUrl: item.url,
+        sourceDate: item.publishedDate,
+        content: `待核查外部发现：${clipText(item.reason || item.snippet, 180)}`,
+        citationText: clipText(item.snippet, 220) || `建议检索：${item.searchQuery || `query_${index + 1}`}`,
+        traceLocation: {
+          searchQuery: item.searchQuery,
+          generatedBy: 'external_search',
+          origin: 'real_web_search',
+          engine: item.engine,
+          reason: item.reason,
+        },
         isUsedInReport: false,
-        reviewStatus: 'downgraded',
+        reviewStatus: 'unreviewed',
       })),
-      warnings: ['externalSearch 已生成待核查外部线索；未人工核验前不得升为高等级证据。'],
+      warnings: ['externalSearch 已接入真实搜索结果；当前仅按 T3 待核查外部证据入池，未抓取原文前不得升为更高等级。'],
     };
   } catch (error) {
     return {
@@ -1019,7 +1147,7 @@ export const enrichTaskForRun = async (
   };
   await options?.onCheckpoint?.(experienceModelState);
   const experienceModelResult = await executeExperienceModelAnalysis(experienceModelState);
-  const baseEvidencePool = [...buildMockEvidence(), ...experienceModelResult.evidenceItems];
+  const baseEvidencePool = [...buildSeedEvidencePool(), ...experienceModelResult.evidenceItems];
   const externalState: ResearchTaskState = {
     ...task,
     currentNode: task.enabledModules.externalSearch ? 'external_search' : 'experience_model_router',
@@ -1032,6 +1160,9 @@ export const enrichTaskForRun = async (
         ...task.runStats.warnings,
         ...problemResult.warnings,
         ...experienceModelResult.warnings,
+        ...(appConfig.research.useMockEvidence
+          ? ['当前启用了 USE_MOCK_EVIDENCE，主证据池包含演示用 mock 证据。']
+          : []),
       ],
     },
   };

@@ -1,9 +1,15 @@
-import { Alert, Button, Card, Empty, Radio, Select, Space, Table, Tabs, Tag, Typography, message } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Card, Empty, Radio, Space, Tag, Typography, message } from 'antd';
 import type { ReportResponse } from '@users-research/shared';
 import { OutputPreviewCard } from '../components/OutputPreviewCard';
+import { ProvenanceSummaryCard } from '../components/ProvenanceSummaryCard';
+import { RouteLoading } from '../components/RouteLoading';
 import { api } from '../lib/api';
+import { buildProvenanceSummary } from '../lib/provenance';
 import { useTaskStore } from '../store/taskStore';
+const ReportTabsPanel = lazy(() =>
+  import('../components/report/ReportTabsPanel').then((module) => ({ default: module.ReportTabsPanel })),
+);
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -111,6 +117,7 @@ const buildSectionDiff = (
 
 export const ReportPage = () => {
   const currentTaskId = useTaskStore((state) => state.currentTaskId);
+  const taskSummary = useTaskStore((state) => state.taskSummary);
   const taskState = useTaskStore((state) => state.taskState);
   const selectedOutput = useTaskStore((state) => state.selectedOutput);
   const currentReport = useTaskStore((state) => state.currentReport);
@@ -293,6 +300,16 @@ export const ReportPage = () => {
       ),
     [diffItems],
   );
+  const provenanceSummary = useMemo(
+    () =>
+      buildProvenanceSummary({
+        taskState,
+        taskSummary,
+        selectedOutput,
+        report: currentReport,
+      }),
+    [currentReport, selectedOutput, taskState, taskSummary],
+  );
 
   const selectReportVersion = useCallback(
     async (reportId: string) => {
@@ -323,12 +340,17 @@ export const ReportPage = () => {
   };
 
   if (!currentTaskId) return <Empty description="请先创建任务" />;
-  if (!candidateOutputs.length) return <Empty description="当前任务还没有可生成报告的候选输出" />;
+  if (!candidateOutputs.length) return <Empty description="该任务还没有可生成报告的候选输出" />;
   if (!currentReport || !selectedOutput) return <Card loading className="page-card" />;
 
   return (
     <Space direction="vertical" size={24} style={{ width: '100%' }}>
-      <Title level={2}>综合报告</Title>
+      <div>
+        <Title level={3} style={{ marginBottom: 8 }}>综合报告</Title>
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          管理当前输出的正式报告、版本历史、差异对比与审核状态。
+        </Paragraph>
+      </div>
 
       {selectedOutput.gateLevel === 'blocked_by_rq' ? (
         <Alert
@@ -374,6 +396,8 @@ export const ReportPage = () => {
         />
       ) : null}
 
+      <ProvenanceSummaryCard summary={provenanceSummary} />
+
       <Card className="page-card">
         <Paragraph>当前查看版本：v{currentReport.version}</Paragraph>
         <Paragraph>报告类型：{currentReport.reportType}</Paragraph>
@@ -397,171 +421,34 @@ export const ReportPage = () => {
         </Radio.Group>
       </Card>
 
-      <OutputPreviewCard output={selectedOutput} />
+      <OutputPreviewCard
+        output={selectedOutput}
+        provenanceTags={provenanceSummary.tags}
+        fallbackWarnings={provenanceSummary.fallbackWarnings}
+      />
 
-      <Card className="page-card">
-        <Tabs
-          items={[
-            {
-              key: 'content',
-              label: '当前内容',
-              children: currentReport.sections.map((section) => (
-                <Card key={`${section.type}-${section.title}`} type="inner" title={section.title} style={{ marginBottom: 12 }}>
-                  {section.content}
-                </Card>
-              )),
-            },
-            {
-              key: 'history',
-              label: '版本历史',
-              children: (
-                <Table
-                  rowKey="id"
-                  loading={historyLoading}
-                  pagination={false}
-                  dataSource={historyReports}
-                  columns={[
-                    {
-                      title: '版本',
-                      render: (_, record) => <Text strong>v{record.version}</Text>,
-                    },
-                    {
-                      title: '状态',
-                      render: (_, record) => (
-                        <Tag color={reportStatusColorMap[record.status] || 'default'}>
-                          {reportStatusLabelMap[record.status] || record.status}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: 'RQ / Gate',
-                      render: (_, record) => (
-                        <Text>
-                          {record.gateResult.rqLevel || '未判定'}
-                          {record.gateResult.blockedReasons?.length
-                            ? ` / ${record.gateResult.blockedReasons.join('；')}`
-                            : ' / 已放行'}
-                        </Text>
-                      ),
-                    },
-                    {
-                      title: '审核信息',
-                      render: (_, record) =>
-                        record.reviewMeta ? (
-                          <Text type="secondary">
-                            {record.reviewMeta.action === 'approve' ? '已通过' : '已退回'}
-                            {record.reviewMeta.reviewer ? ` · ${record.reviewMeta.reviewer}` : ''}
-                          </Text>
-                        ) : (
-                          <Text type="secondary">未审核</Text>
-                        ),
-                    },
-                    {
-                      title: '操作',
-                      render: (_, record) => (
-                        <Space size={4}>
-                          <Button
-                            type={currentReport.id === record.id ? 'primary' : 'default'}
-                            ghost={currentReport.id === record.id}
-                            onClick={() => void selectReportVersion(record.id)}
-                          >
-                            {currentReport.id === record.id ? '当前查看' : '查看此版本'}
-                          </Button>
-                          {latestReportId === record.id ? <Tag color="green">最新</Tag> : null}
-                        </Space>
-                      ),
-                    },
-                  ]}
-                />
-              ),
-            },
-            {
-              key: 'diff',
-              label: '版本对比',
-              children: (
-                <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                  <Space wrap>
-                    <span>基线版本：</span>
-                    <Select
-                      style={{ width: 180 }}
-                      value={compareBaseId}
-                      options={historyReports.map((report) => ({
-                        label: `v${report.version} · ${reportStatusLabelMap[report.status] || report.status}`,
-                        value: report.id,
-                      }))}
-                      onChange={setCompareBaseId}
-                    />
-                    <span>对比版本：</span>
-                    <Select
-                      style={{ width: 180 }}
-                      value={compareTargetId}
-                      options={historyReports.map((report) => ({
-                        label: `v${report.version} · ${reportStatusLabelMap[report.status] || report.status}`,
-                        value: report.id,
-                      }))}
-                      onChange={setCompareTargetId}
-                    />
-                  </Space>
-
-                  <Space wrap>
-                    <Tag color="gold">修改 {diffSummary.changed}</Tag>
-                    <Tag color="green">新增 {diffSummary.added}</Tag>
-                    <Tag color="red">删除 {diffSummary.removed}</Tag>
-                    <Tag>未变化 {diffSummary.unchanged}</Tag>
-                  </Space>
-
-                  {compareBaseReport && compareTargetReport ? (
-                    <Alert
-                      type="info"
-                      showIcon
-                      message={`正在对比 v${compareBaseReport.version} → v${compareTargetReport.version}`}
-                      description="对比结果按章节聚合展示，可快速判断本轮报告新增、删除和改写内容。"
-                    />
-                  ) : null}
-
-                  {diffItems.length ? (
-                    diffItems.map((item) => (
-                      <Card
-                        key={item.key}
-                        type="inner"
-                        title={
-                          <Space>
-                            <span>{item.title}</span>
-                            <Tag>{item.type}</Tag>
-                            <Tag color={diffStatusColorMap[item.status]}>
-                              {diffStatusLabelMap[item.status]}
-                            </Tag>
-                          </Space>
-                        }
-                      >
-                        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                          <Card size="small" title={`基线内容${compareBaseReport ? ` · v${compareBaseReport.version}` : ''}`}>
-                            <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-                              {item.before || '该版本无此章节'}
-                            </Paragraph>
-                          </Card>
-                          <Card size="small" title={`对比内容${compareTargetReport ? ` · v${compareTargetReport.version}` : ''}`}>
-                            <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-                              {item.after || '该版本无此章节'}
-                            </Paragraph>
-                          </Card>
-                        </Space>
-                      </Card>
-                    ))
-                  ) : (
-                    <Empty description="当前没有可展示的版本差异" />
-                  )}
-                </Space>
-              ),
-            },
-            {
-              key: 'gaps',
-              label: 'Gate 与缺口',
-              children: `RQ：${currentReport.gateResult.rqLevel}；屏蔽来源：${currentReport.gateResult.blockedSources.join(', ') || '无'}；门禁原因：${currentReport.gateResult.blockedReasons?.join('；') || '无'}`,
-            },
-          ]}
+      <Suspense fallback={<RouteLoading />}>
+        <ReportTabsPanel
+          currentReport={currentReport}
+          historyLoading={historyLoading}
+          historyReports={historyReports}
+          reportStatusColorMap={reportStatusColorMap}
+          reportStatusLabelMap={reportStatusLabelMap}
+          currentReportId={currentReport.id}
+          latestReportId={latestReportId}
+          selectReportVersion={selectReportVersion}
+          compareBaseId={compareBaseId}
+          compareTargetId={compareTargetId}
+          setCompareBaseId={setCompareBaseId}
+          setCompareTargetId={setCompareTargetId}
+          diffSummary={diffSummary}
+          diffItems={diffItems}
+          compareBaseReport={compareBaseReport}
+          compareTargetReport={compareTargetReport}
+          diffStatusColorMap={diffStatusColorMap}
+          diffStatusLabelMap={diffStatusLabelMap}
         />
-      </Card>
+      </Suspense>
 
       <Space>
         <Button

@@ -1,5 +1,5 @@
-﻿import { appConfig } from './config/env';
-import { buildServer } from './app';
+import { appConfig } from './config/env.js';
+import { buildServer } from './app.js';
 
 const start = async () => {
   const app = buildServer();
@@ -14,6 +14,7 @@ const start = async () => {
         host: appConfig.server.host,
         port: appConfig.server.port,
         persistenceEnabled: appConfig.persistence.enabled,
+        persistenceMode: appConfig.persistence.mode,
       },
       'server started',
     );

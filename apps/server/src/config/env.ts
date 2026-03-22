@@ -3,6 +3,21 @@ import { dirname, resolve } from 'node:path';
 
 type EnvMap = Record<string, string>;
 
+const parseCorsOrigin = (value?: string): true | string | string[] => {
+  if (!value || value === '*') return true;
+
+  const origins = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (origins.length <= 1) {
+    return origins[0] || true;
+  }
+
+  return origins;
+};
+
 const parseEnvFile = (filepath: string): EnvMap => {
   if (!existsSync(filepath)) return {};
 
@@ -32,7 +47,8 @@ const findNearestEnvFile = (filename: string): string | undefined => {
   }
 };
 
-const fileEnv = parseEnvFile(findNearestEnvFile('.env.local') || resolve(process.cwd(), '.env.local'));
+const resolvedEnvFilePath = findNearestEnvFile('.env.local') || resolve(process.cwd(), '.env.local');
+const fileEnv = parseEnvFile(resolvedEnvFilePath);
 
 const readEnv = (...keys: string[]): string | undefined => {
   for (const key of keys) {
@@ -42,17 +58,35 @@ const readEnv = (...keys: string[]): string | undefined => {
   return undefined;
 };
 
+const databaseUrl = readEnv('DATABASE_URL');
+const persistenceMode: 'memory' | 'sqlite' | 'postgresql' = !databaseUrl
+  ? 'memory'
+  : databaseUrl.startsWith('file:')
+    ? 'sqlite'
+    : 'postgresql';
+
 export const appConfig = {
+  paths: {
+    cwd: process.cwd(),
+    envFilePath: resolvedEnvFilePath,
+    envDir: dirname(resolvedEnvFilePath),
+  },
   env: readEnv('NODE_ENV') || 'development',
   server: {
     host: readEnv('HOST') || '0.0.0.0',
     port: Number(readEnv('PORT') || '8787'),
+    corsOrigin: parseCorsOrigin(readEnv('CORS_ORIGIN')),
   },
   persistence: {
-    databaseUrl: readEnv('DATABASE_URL'),
-    enabled: Boolean(readEnv('DATABASE_URL')),
+    databaseUrl,
+    enabled: Boolean(databaseUrl),
+    mode: persistenceMode,
+  },
+  research: {
+    useMockEvidence: readEnv('USE_MOCK_EVIDENCE') === 'true',
   },
   models: {
+    disabled: readEnv('DISABLE_TEXT_MODELS') === 'true',
     textApiUrl: readEnv('TEXT_MODEL_API_URL', 'VITE_TEXT_MODEL_API_URL'),
     textApiKey: readEnv('TEXT_MODEL_API_KEY', 'VITE_TEXT_MODEL_API_KEY'),
     anthropicApiUrl: readEnv('ANTHROPIC_API_URL', 'VITE_ANTHROPIC_API_URL'),
@@ -61,6 +95,17 @@ export const appConfig = {
     geminiApiKey: readEnv('GEMINI_API_KEY', 'VITE_GEMINI_API_KEY'),
     jimengImageApiUrl: readEnv('JIMENG_IMAGE_API_URL', 'VITE_JIMENG_IMAGE_API_URL'),
     jimengApiKey: readEnv('JIMENG_API_KEY', 'VITE_JIMENG_API_KEY'),
+  },
+  search: {
+    tavilyApiKey: readEnv('TAVILY_API_KEY'),
+    tavilyApiUrl: readEnv('TAVILY_API_URL') || 'https://api.tavily.com/search',
+    googlePseApiKey: readEnv('GOOGLE_PSE_API_KEY'),
+    googlePseCx: readEnv('GOOGLE_PSE_CX'),
+    googlePseApiUrl:
+      readEnv('GOOGLE_PSE_API_URL') || 'https://www.googleapis.com/customsearch/v1',
+    exaApiKey: readEnv('EXA_API_KEY'),
+    exaApiUrl: readEnv('EXA_API_URL') || 'https://api.exa.ai/search',
+    timeoutMs: Number(readEnv('SEARCH_TIMEOUT_MS') || '12000'),
   },
   oss: {
     region: readEnv('JD_OSS_REGION'),

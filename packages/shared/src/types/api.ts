@@ -13,7 +13,7 @@ import type {
   TaskStatus,
   TierLevel,
   VisionFinding,
-} from './research';
+} from './research.js';
 
 export interface CreateTaskFileInput {
   fileId: string;
@@ -69,6 +69,10 @@ export interface TaskSummaryResponse {
     costEstimate?: number;
     warnings: string[];
   };
+}
+
+export interface TaskListResponse {
+  items: TaskSummaryResponse[];
 }
 
 export interface EvidenceListResponse {

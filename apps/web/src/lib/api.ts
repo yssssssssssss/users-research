@@ -14,6 +14,7 @@
   ReviewReportResponse,
   SubQuestionsResponse,
   TaskSnapshotResponse,
+  TaskListResponse,
   TaskSummaryResponse,
   VisionResponse,
 } from '@users-research/shared';
@@ -54,6 +55,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  listTasks: (limit = 20) =>
+    request<TaskListResponse>(`/api/research/tasks?limit=${encodeURIComponent(String(limit))}`),
   previewPlan: (taskId: string) =>
     request<PreviewPlanResponse>(`/api/research/tasks/${taskId}/preview-plan`, {
       method: 'POST',

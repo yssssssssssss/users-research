@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 ﻿import type {
   CandidateOutput,
   EnabledModules,
@@ -9,7 +10,7 @@
   VisionFinding,
 } from '@users-research/shared';
 
-const uid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+const uid = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, '')}`;
 
 export const buildMockSubQuestions = (query: string): SubQuestion[] => [
   {

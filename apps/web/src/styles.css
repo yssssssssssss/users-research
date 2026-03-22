@@ -17,6 +17,10 @@ body {
   border-radius: 16px;
 }
 
+.current-task-summary-card .ant-statistic {
+  min-width: 0;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

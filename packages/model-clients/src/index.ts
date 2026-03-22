@@ -1,1 +1,1 @@
-﻿export * from '../../../modelClients';
+export * from '../../../modelClients.js';

@@ -1,10 +1,14 @@
-import { Alert, Button, Card, Empty, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Card, Empty, Space, Statistic, Typography, message } from 'antd';
 import type { EvidenceItem, ResearchTaskState, TierLevel } from '@users-research/shared';
+import { RouteLoading } from '../components/RouteLoading';
 import { api } from '../lib/api';
 import { useTaskStore } from '../store/taskStore';
 
 const { Title, Paragraph, Link, Text } = Typography;
+const EvidenceReviewTable = lazy(() =>
+  import('../components/evidence/EvidenceReviewTable').then((module) => ({ default: module.EvidenceReviewTable })),
+);
 
 const RECOMPUTE_POLL_INTERVAL_MS = 2000;
 const MAX_RECOMPUTE_POLL_ATTEMPTS = 12;
@@ -216,104 +220,21 @@ export const EvidenceBoardPage = () => {
           本页用于查看证据来源、Tier 分级、引用位置与人工复核状态。
           当复核触发后台重算时，系统会自动锁定新的复核提交，并周期性刷新任务状态。
         </Paragraph>
-        <Table
-          rowKey="id"
-          dataSource={items}
-          pagination={false}
-          columns={[
-            {
-              title: '来源名称',
-              render: (_, item) => <Text strong>{item.sourceName || '未命名来源'}</Text>,
-            },
-            {
-              title: '来源类型',
-              dataIndex: 'sourceType',
-              render: (value: string) => <Tag>{value}</Tag>,
-            },
-            {
-              title: '来源级别',
-              dataIndex: 'sourceLevel',
-              render: (value: string) => <Tag>{value}</Tag>,
-            },
-            {
-              title: 'Tier',
-              dataIndex: 'tier',
-              render: (value: string) => <Tag color={tierColorMap[value] || 'default'}>{value}</Tag>,
-            },
-            {
-              title: '证据内容',
-              dataIndex: 'content',
-              width: '24%',
-            },
-            {
-              title: '引用文本',
-              render: (_, item) => <Text type="secondary">{item.citationText || '暂无引用文本'}</Text>,
-            },
-            {
-              title: '来源链接',
-              render: (_, item) =>
-                item.sourceUrl ? (
-                  <Link href={item.sourceUrl} target="_blank">
-                    打开来源
-                  </Link>
-                ) : (
-                  <Text type="secondary">暂无</Text>
-                ),
-            },
-            {
-              title: '复核状态',
-              render: (_, item) => (
-                <Tag color={reviewColorMap[item.reviewStatus] || 'default'}>
-                  {reviewLabelMap[item.reviewStatus]}
-                </Tag>
-              ),
-            },
-            {
-              title: '复核操作',
-              render: (_, item) => (
-                <Space direction="vertical" size={8}>
-                  <Select
-                    size="small"
-                    style={{ width: 96 }}
-                    options={tierOptions}
-                    value={tierDrafts[item.id] || item.tier}
-                    disabled={actionLocked}
-                    onChange={(value) => setTierDrafts((prev) => ({ ...prev, [item.id]: value as TierLevel }))}
-                  />
-                  <Space wrap size={4}>
-                    <Button
-                      size="small"
-                      type="primary"
-                      loading={submittingId === item.id}
-                      disabled={actionLocked}
-                      onClick={() => handleReview(item, 'accepted')}
-                    >
-                      接受
-                    </Button>
-                    <Button
-                      size="small"
-                      loading={submittingId === item.id}
-                      disabled={actionLocked}
-                      onClick={() => handleReview(item, 'downgraded')}
-                    >
-                      降权
-                    </Button>
-                    <Button
-                      size="small"
-                      danger
-                      loading={submittingId === item.id}
-                      disabled={actionLocked}
-                      onClick={() => handleReview(item, 'rejected')}
-                    >
-                      拒绝
-                    </Button>
-                  </Space>
-                  {isRecomputing ? <Text type="secondary">重算进行中，操作已锁定</Text> : null}
-                </Space>
-              ),
-            },
-          ]}
-        />
+        <Suspense fallback={<RouteLoading />}>
+          <EvidenceReviewTable
+            items={items}
+            tierColorMap={tierColorMap}
+            reviewColorMap={reviewColorMap}
+            reviewLabelMap={reviewLabelMap}
+            tierDrafts={tierDrafts}
+            tierOptions={tierOptions}
+            actionLocked={actionLocked}
+            submittingId={submittingId}
+            isRecomputing={isRecomputing}
+            onTierChange={(itemId, value) => setTierDrafts((prev) => ({ ...prev, [itemId]: value }))}
+            onReview={handleReview}
+          />
+        </Suspense>
       </Card>
     </Space>
   );

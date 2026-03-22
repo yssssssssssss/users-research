@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   CandidateOutput,
   CreateTaskRequest,
@@ -26,11 +27,24 @@ import type {
   VisionFinding as PrismaVisionFinding,
 } from '@prisma/client';
 import { Prisma } from '@prisma/client';
-import { appConfig } from '../config/env';
-import { getPrismaClient } from '../lib/prisma';
-import { enrichTaskForRun, executeJudgmentSynthesizer } from '../orchestrator/textNodes';
-import { analyzeExperienceModels } from './experienceModelService';
-import { reportStore, taskStore } from './mockStore';
+import { appConfig } from '../config/env.js';
+import { getPrismaClient } from '../lib/prisma.js';
+import {
+  enrichTaskForRun,
+  executeJudgmentSynthesizer,
+  executePersonaSandbox,
+  executeVisionMoE,
+} from '../orchestrator/textNodes.js';
+import { analyzeExperienceModels } from './experienceModelService.js';
+import { reportStore, taskStore } from './mockStore.js';
+import {
+  getReportFromSqlite,
+  getTaskFromSqlite,
+  getTaskIdByReportIdFromSqlite,
+  listTasksFromSqlite,
+  saveReportToSqlite,
+  saveTaskToSqlite,
+} from './sqliteStore.js';
 
 type PersistedTask = PrismaResearchTask & {
   subQuestions: PrismaSubQuestion[];
@@ -44,6 +58,7 @@ type PersistedTask = PrismaResearchTask & {
 
 const recomputeJobs = new Map<string, Promise<void>>();
 const taskRunJobs = new Map<string, Promise<ResearchTaskState>>();
+const createPrefixedId = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, '')}`;
 
 const taskInclude = {
   subQuestions: true,
@@ -674,7 +689,66 @@ const getReportFromDb = async (reportId: string): Promise<ReportResponse> => {
   };
 };
 
-const shouldUseDb = (): boolean => appConfig.persistence.enabled;
+const getPersistenceMode = (): 'memory' | 'sqlite' | 'postgresql' => appConfig.persistence.mode;
+const shouldUseDb = (): boolean => getPersistenceMode() === 'postgresql';
+const shouldUseSqlite = (): boolean => getPersistenceMode() === 'sqlite';
+
+const isDegradedWarning = (warning: string): boolean => /mock|回退|fallback|超时|降级/i.test(warning);
+
+export const getObservabilitySummary = async (): Promise<{
+  totalTasks: number;
+  avgLatencyMs: number;
+  avgCost: number;
+  degradeCount: number;
+}> => {
+  if (shouldUseDb()) {
+    const prisma = getPrismaClient();
+    const tasks = await prisma.researchTask.findMany({
+      select: {
+        createdAt: true,
+        finishedAt: true,
+        status: true,
+      },
+    });
+
+    const latencies = tasks
+      .filter((task) => task.finishedAt)
+      .map((task) => new Date(task.finishedAt as Date).getTime() - new Date(task.createdAt).getTime())
+      .filter((value) => Number.isFinite(value) && value >= 0);
+
+    const avgLatencyMs =
+      latencies.length > 0
+        ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length)
+        : 0;
+
+    return {
+      totalTasks: tasks.length,
+      avgLatencyMs,
+      avgCost: 0,
+      degradeCount: tasks.filter((task) => task.status === 'partial_failed' || task.status === 'failed')
+        .length,
+    };
+  }
+
+  const tasks = Array.from(taskStore.values());
+  const latencies = tasks
+    .map((task) => task.runStats.latencyMs)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0);
+  const costs = tasks
+    .map((task) => task.runStats.costEstimate)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0);
+
+  return {
+    totalTasks: tasks.length,
+    avgLatencyMs:
+      latencies.length > 0
+        ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length)
+        : 0,
+    avgCost:
+      costs.length > 0 ? Number((costs.reduce((sum, value) => sum + value, 0) / costs.length).toFixed(2)) : 0,
+    degradeCount: tasks.filter((task) => task.runStats.warnings.some(isDegradedWarning)).length,
+  };
+};
 
 const getTaskFromMemory = (taskId: string): ResearchTaskState => {
   const task = taskStore.get(taskId);
@@ -688,7 +762,11 @@ const saveTaskToMemory = (task: ResearchTaskState): ResearchTaskState => {
 };
 
 const persistRuntimeState = async (state: ResearchTaskState): Promise<ResearchTaskState> =>
-  shouldUseDb() ? persistStateToDb(state) : saveTaskToMemory(state);
+  shouldUseDb()
+    ? persistStateToDb(state)
+    : shouldUseSqlite()
+      ? saveTaskToSqlite(state)
+      : saveTaskToMemory(state);
 
 const loadTaskFromDb = async (taskId: string): Promise<ResearchTaskState> => {
   const prisma = getPrismaClient();
@@ -747,110 +825,246 @@ const persistStateToDb = async (state: ResearchTaskState): Promise<ResearchTaskS
       } as any,
     });
 
-    await tx.subQuestion.deleteMany({ where: { taskId: state.taskId } });
     if (state.subQuestions.length > 0) {
-      await tx.subQuestion.createMany({
-        data: state.subQuestions.map((item) => ({
-          id: item.id,
-          taskId: state.taskId,
-          seq: item.seq,
-          text: item.text,
-          audience: item.audience ?? null,
-          scenario: item.scenario ?? null,
-          journeyPath: item.journeyPath ?? null,
-          decisionPoint: item.decisionPoint ?? null,
-          status: item.status,
-        })),
-      });
-    }
-
-    await tx.evidenceItem.deleteMany({ where: { taskId: state.taskId } });
-    if (state.evidencePool.length > 0) {
-      await tx.evidenceItem.createMany({
-        data: state.evidencePool.map((item) => ({
-          id: item.id,
-          taskId: state.taskId,
-          subQuestionId: item.subQuestionId ?? null,
-          sourceType: item.sourceType,
-          sourceLevel: item.sourceLevel,
-          tier: item.tier,
-          confidenceScore: item.confidenceScore ?? null,
-          sourceName: item.sourceName ?? null,
-          sourceUrl: item.sourceUrl ?? null,
-          sourceDate: item.sourceDate ? new Date(item.sourceDate) : null,
-          traceLocation: item.traceLocation ? asJson(item.traceLocation) : undefined,
-          content: item.content,
-          citationText: item.citationText ?? null,
-          isUsedInReport: item.isUsedInReport,
-          reviewStatus: item.reviewStatus,
-        })),
-      });
-    }
-
-    await tx.evidenceConflict.deleteMany({ where: { taskId: state.taskId } });
-    if (state.evidenceConflicts.length > 0) {
-      await tx.evidenceConflict.createMany({
-        data: state.evidenceConflicts.map((item) => ({
-          id: item.id,
-          taskId: state.taskId,
-          topic: item.topic,
-          evidenceAId: item.evidenceAId,
-          evidenceBId: item.evidenceBId,
-          conflictReason: item.conflictReason,
-          status: item.status,
-        })),
-      });
-    }
-
-    await tx.visionFinding.deleteMany({ where: { taskId: state.taskId } });
-    if (state.visionFindings.length > 0) {
-      await tx.visionFinding.createMany({
-        data: state.visionFindings.map((item) => ({
-          id: item.id,
-          taskId: state.taskId,
-          findingType: item.findingType,
-          riskLevel: item.riskLevel,
-          content: item.content,
-          regionRef: item.regionRef ? asJson(item.regionRef) : undefined,
-          consensusGroupId: null,
-          isConsensus: item.isConsensus ?? false,
-          isConflict: item.isConflict ?? false,
-        })),
-      });
-    }
-
-    await tx.personaFinding.deleteMany({ where: { taskId: state.taskId } });
-    if (state.personaFindings.length > 0) {
-      await tx.personaFinding.createMany({
-        data: state.personaFindings.map((item) => ({
-          id: item.id,
-          taskId: state.taskId,
-          personaName: item.personaName,
-          stance: item.stance ?? null,
-          theme: item.theme ?? null,
-          content: item.content,
-          isSimulated: item.isSimulated,
-        })),
-      });
-    }
-
-    await tx.candidateOutput.deleteMany({ where: { taskId: state.taskId } });
-    if (state.candidateOutputs.length > 0) {
-      await tx.candidateOutput.createMany({
-        data: state.candidateOutputs.map((item) => ({
-          id: item.id,
-          taskId: state.taskId,
-          outputType: item.outputType,
-          sourceNode: item.sourceNode,
-          gateLevel: item.gateLevel ?? null,
-          summary: item.summary ?? null,
-          contentJson: asJson({
-            ...item.contentJson,
-            ...(item.gateNotes?.length ? { gateNotes: item.gateNotes } : {}),
+      await Promise.all(
+        state.subQuestions.map((item) =>
+          tx.subQuestion.upsert({
+            where: { id: item.id },
+            update: {
+              taskId: state.taskId,
+              seq: item.seq,
+              text: item.text,
+              audience: item.audience ?? null,
+              scenario: item.scenario ?? null,
+              journeyPath: item.journeyPath ?? null,
+              decisionPoint: item.decisionPoint ?? null,
+              status: item.status,
+            },
+            create: {
+              id: item.id,
+              taskId: state.taskId,
+              seq: item.seq,
+              text: item.text,
+              audience: item.audience ?? null,
+              scenario: item.scenario ?? null,
+              journeyPath: item.journeyPath ?? null,
+              decisionPoint: item.decisionPoint ?? null,
+              status: item.status,
+            },
           }),
-          status: item.status,
-        })),
+        ),
+      );
+      await tx.subQuestion.deleteMany({
+        where: {
+          taskId: state.taskId,
+          id: { notIn: state.subQuestions.map((item) => item.id) },
+        },
       });
+    } else {
+      await tx.subQuestion.deleteMany({ where: { taskId: state.taskId } });
+    }
+
+    if (state.evidencePool.length > 0) {
+      await Promise.all(
+        state.evidencePool.map((item) =>
+          tx.evidenceItem.upsert({
+            where: { id: item.id },
+            update: {
+              taskId: state.taskId,
+              subQuestionId: item.subQuestionId ?? null,
+              sourceType: item.sourceType,
+              sourceLevel: item.sourceLevel,
+              tier: item.tier,
+              confidenceScore: item.confidenceScore ?? null,
+              sourceName: item.sourceName ?? null,
+              sourceUrl: item.sourceUrl ?? null,
+              sourceDate: item.sourceDate ? new Date(item.sourceDate) : null,
+              traceLocation: item.traceLocation ? asJson(item.traceLocation) : undefined,
+              content: item.content,
+              citationText: item.citationText ?? null,
+              isUsedInReport: item.isUsedInReport,
+              reviewStatus: item.reviewStatus,
+            },
+            create: {
+              id: item.id,
+              taskId: state.taskId,
+              subQuestionId: item.subQuestionId ?? null,
+              sourceType: item.sourceType,
+              sourceLevel: item.sourceLevel,
+              tier: item.tier,
+              confidenceScore: item.confidenceScore ?? null,
+              sourceName: item.sourceName ?? null,
+              sourceUrl: item.sourceUrl ?? null,
+              sourceDate: item.sourceDate ? new Date(item.sourceDate) : null,
+              traceLocation: item.traceLocation ? asJson(item.traceLocation) : undefined,
+              content: item.content,
+              citationText: item.citationText ?? null,
+              isUsedInReport: item.isUsedInReport,
+              reviewStatus: item.reviewStatus,
+            },
+          }),
+        ),
+      );
+      await tx.evidenceItem.deleteMany({
+        where: {
+          taskId: state.taskId,
+          id: { notIn: state.evidencePool.map((item) => item.id) },
+        },
+      });
+    } else {
+      await tx.evidenceItem.deleteMany({ where: { taskId: state.taskId } });
+    }
+
+    if (state.evidenceConflicts.length > 0) {
+      await Promise.all(
+        state.evidenceConflicts.map((item) =>
+          tx.evidenceConflict.upsert({
+            where: { id: item.id },
+            update: {
+              taskId: state.taskId,
+              topic: item.topic,
+              evidenceAId: item.evidenceAId,
+              evidenceBId: item.evidenceBId,
+              conflictReason: item.conflictReason,
+              status: item.status,
+            },
+            create: {
+              id: item.id,
+              taskId: state.taskId,
+              topic: item.topic,
+              evidenceAId: item.evidenceAId,
+              evidenceBId: item.evidenceBId,
+              conflictReason: item.conflictReason,
+              status: item.status,
+            },
+          }),
+        ),
+      );
+      await tx.evidenceConflict.deleteMany({
+        where: {
+          taskId: state.taskId,
+          id: { notIn: state.evidenceConflicts.map((item) => item.id) },
+        },
+      });
+    } else {
+      await tx.evidenceConflict.deleteMany({ where: { taskId: state.taskId } });
+    }
+
+    if (state.visionFindings.length > 0) {
+      await Promise.all(
+        state.visionFindings.map((item) =>
+          tx.visionFinding.upsert({
+            where: { id: item.id },
+            update: {
+              taskId: state.taskId,
+              findingType: item.findingType,
+              riskLevel: item.riskLevel,
+              content: item.content,
+              regionRef: item.regionRef ? asJson(item.regionRef) : undefined,
+              consensusGroupId: null,
+              isConsensus: item.isConsensus ?? false,
+              isConflict: item.isConflict ?? false,
+            },
+            create: {
+              id: item.id,
+              taskId: state.taskId,
+              findingType: item.findingType,
+              riskLevel: item.riskLevel,
+              content: item.content,
+              regionRef: item.regionRef ? asJson(item.regionRef) : undefined,
+              consensusGroupId: null,
+              isConsensus: item.isConsensus ?? false,
+              isConflict: item.isConflict ?? false,
+            },
+          }),
+        ),
+      );
+      await tx.visionFinding.deleteMany({
+        where: {
+          taskId: state.taskId,
+          id: { notIn: state.visionFindings.map((item) => item.id) },
+        },
+      });
+    } else {
+      await tx.visionFinding.deleteMany({ where: { taskId: state.taskId } });
+    }
+
+    if (state.personaFindings.length > 0) {
+      await Promise.all(
+        state.personaFindings.map((item) =>
+          tx.personaFinding.upsert({
+            where: { id: item.id },
+            update: {
+              taskId: state.taskId,
+              personaName: item.personaName,
+              stance: item.stance ?? null,
+              theme: item.theme ?? null,
+              content: item.content,
+              isSimulated: item.isSimulated,
+            },
+            create: {
+              id: item.id,
+              taskId: state.taskId,
+              personaName: item.personaName,
+              stance: item.stance ?? null,
+              theme: item.theme ?? null,
+              content: item.content,
+              isSimulated: item.isSimulated,
+            },
+          }),
+        ),
+      );
+      await tx.personaFinding.deleteMany({
+        where: {
+          taskId: state.taskId,
+          id: { notIn: state.personaFindings.map((item) => item.id) },
+        },
+      });
+    } else {
+      await tx.personaFinding.deleteMany({ where: { taskId: state.taskId } });
+    }
+
+    if (state.candidateOutputs.length > 0) {
+      await Promise.all(
+        state.candidateOutputs.map((item) =>
+          tx.candidateOutput.upsert({
+            where: { id: item.id },
+            update: {
+              taskId: state.taskId,
+              outputType: item.outputType,
+              sourceNode: item.sourceNode,
+              gateLevel: item.gateLevel ?? null,
+              summary: item.summary ?? null,
+              contentJson: asJson({
+                ...item.contentJson,
+                ...(item.gateNotes?.length ? { gateNotes: item.gateNotes } : {}),
+              }),
+              status: item.status,
+            },
+            create: {
+              id: item.id,
+              taskId: state.taskId,
+              outputType: item.outputType,
+              sourceNode: item.sourceNode,
+              gateLevel: item.gateLevel ?? null,
+              summary: item.summary ?? null,
+              contentJson: asJson({
+                ...item.contentJson,
+                ...(item.gateNotes?.length ? { gateNotes: item.gateNotes } : {}),
+              }),
+              status: item.status,
+            },
+          }),
+        ),
+      );
+      await tx.candidateOutput.deleteMany({
+        where: {
+          taskId: state.taskId,
+          id: { notIn: state.candidateOutputs.map((item) => item.id) },
+        },
+      });
+    } else {
+      await tx.candidateOutput.deleteMany({ where: { taskId: state.taskId } });
     }
 
     if (state.finalReports.length > 0) {
@@ -896,7 +1110,7 @@ const persistStateToDb = async (state: ResearchTaskState): Promise<ResearchTaskS
 };
 
 export const createTask = async (payload: CreateTaskRequest): Promise<ResearchTaskState> => {
-  const taskId = `task_${Math.random().toString(36).slice(2, 10)}`;
+  const taskId = createPrefixedId('task');
   const task: ResearchTaskState = {
     taskId,
     title: payload.title,
@@ -935,11 +1149,19 @@ export const createTask = async (payload: CreateTaskRequest): Promise<ResearchTa
     runStats: { warnings: [] },
   };
 
-  return shouldUseDb() ? persistStateToDb(task) : saveTaskToMemory(task);
+  return shouldUseDb()
+    ? persistStateToDb(task)
+    : shouldUseSqlite()
+      ? saveTaskToSqlite(task)
+      : saveTaskToMemory(task);
 };
 
 export const getTask = async (taskId: string): Promise<ResearchTaskState> => {
-  const task = shouldUseDb() ? await loadTaskFromDb(taskId) : getTaskFromMemory(taskId);
+  const task = shouldUseDb()
+    ? await loadTaskFromDb(taskId)
+    : shouldUseSqlite()
+      ? getTaskFromSqlite(taskId)
+      : getTaskFromMemory(taskId);
   return applyOutputGates(task);
 };
 
@@ -1035,6 +1257,33 @@ export const getTaskSummary = async (taskId: string): Promise<TaskSummaryRespons
       ),
     },
   };
+};
+
+export const listTaskSummaries = async (limit = 20): Promise<TaskSummaryResponse[]> => {
+  const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit) || 20));
+
+  if (shouldUseDb()) {
+    const prisma = getPrismaClient();
+    const tasks = await prisma.researchTask.findMany({
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+      take: safeLimit,
+    });
+
+    return Promise.all(tasks.map((item) => getTaskSummary(item.id)));
+  }
+
+  if (shouldUseSqlite()) {
+    const tasks = listTasksFromSqlite(safeLimit);
+    return Promise.all(tasks.map((item) => getTaskSummary(item.taskId)));
+  }
+
+  const tasks = Array.from(taskStore.values())
+    .slice()
+    .reverse()
+    .slice(0, safeLimit);
+
+  return Promise.all(tasks.map((item) => getTaskSummary(item.taskId)));
 };
 
 export const getEvidence = async (taskId: string): Promise<EvidenceListResponse> => {
@@ -1289,6 +1538,82 @@ export const getOutputs = async (taskId: string): Promise<OutputsResponse> => {
   };
 };
 
+const rerunBranchJudgment = async (
+  task: ResearchTaskState,
+  branch: 'vision_moe' | 'persona_sandbox',
+): Promise<ResearchTaskState> => {
+  const branchLabel = branch === 'vision_moe' ? 'Vision' : 'Persona';
+  const runningTask: ResearchTaskState = {
+    ...task,
+    status: 'running',
+    reviewStatus: 'pending',
+    currentNode: branch,
+    runStats: {
+      ...task.runStats,
+      warnings: mergeWarnings(task.runStats.warnings, [`${branchLabel} 支路已触发重跑。`]),
+    },
+  };
+
+  const visionResult =
+    branch === 'vision_moe'
+      ? await executeVisionMoE(runningTask)
+      : { visionFindings: task.visionFindings, warnings: [] };
+
+  const personaInput: ResearchTaskState = {
+    ...runningTask,
+    currentNode: task.enabledModules.personaSandbox ? 'persona_sandbox' : 'judgment_synthesizer',
+    visionFindings: visionResult.visionFindings,
+    runStats: {
+      ...runningTask.runStats,
+      warnings: mergeWarnings(runningTask.runStats.warnings, visionResult.warnings),
+    },
+  };
+
+  const personaResult =
+    branch === 'persona_sandbox' || branch === 'vision_moe'
+      ? await executePersonaSandbox(personaInput)
+      : { personaFindings: task.personaFindings, warnings: [] };
+
+  const synthesisInput: ResearchTaskState = {
+    ...personaInput,
+    currentNode: 'judgment_synthesizer',
+    personaFindings: personaResult.personaFindings,
+    runStats: {
+      ...personaInput.runStats,
+      warnings: mergeWarnings(personaInput.runStats.warnings, personaResult.warnings),
+    },
+  };
+
+  const recomputedTask = await recomputeTaskJudgment(synthesisInput, 'evidence_review');
+  return shouldUseDb() ? persistStateToDb(recomputedTask) : saveTaskToMemory(recomputedTask);
+};
+
+export const rerunVision = async (taskId: string) => {
+  const task = await getTask(taskId);
+  const nextState = await rerunBranchJudgment(task, 'vision_moe');
+
+  return {
+    taskId,
+    branch: 'vision_moe' as const,
+    status: 'completed' as const,
+    task: await getTaskSummary(taskId),
+    state: nextState,
+  };
+};
+
+export const rerunPersona = async (taskId: string) => {
+  const task = await getTask(taskId);
+  const nextState = await rerunBranchJudgment(task, 'persona_sandbox');
+
+  return {
+    taskId,
+    branch: 'persona_sandbox' as const,
+    status: 'completed' as const,
+    task: await getTaskSummary(taskId),
+    state: nextState,
+  };
+};
+
 export const overrideExperienceModels = async (options: {
   taskId: string;
   mode?: 'auto' | 'manual';
@@ -1359,7 +1684,7 @@ export const generateReport = async (
     task.finalReports.reduce((max, item) => Math.max(max, item.version), 0) + 1;
   const reportType = selected.outputType;
   const report = buildReportResponse({
-    id: `report_${Math.random().toString(36).slice(2, 10)}`,
+    id: createPrefixedId('report'),
     version: nextVersion,
     reportType,
     status: 'pending_review',
@@ -1385,6 +1710,9 @@ export const generateReport = async (
 
   if (shouldUseDb()) {
     await persistStateToDb(nextState);
+  } else if (shouldUseSqlite()) {
+    saveTaskToSqlite(nextState);
+    saveReportToSqlite(nextState.taskId, report);
   } else {
     saveTaskToMemory(nextState);
     reportStore.set(report.id, report);
@@ -1394,7 +1722,11 @@ export const generateReport = async (
 };
 
 export const getReport = async (reportId: string): Promise<ReportResponse> =>
-  shouldUseDb() ? getReportFromDb(reportId) : getReportFromMemory(reportId);
+  shouldUseDb()
+    ? getReportFromDb(reportId)
+    : shouldUseSqlite()
+      ? getReportFromSqlite(reportId)
+      : getReportFromMemory(reportId);
 
 export const reviewReport = async (
   reportId: string,
@@ -1449,6 +1781,47 @@ export const reviewReport = async (
 
     return {
       report: await getReportFromDb(reportId),
+      task: {
+        taskId: nextState.taskId,
+        status: nextState.status,
+        reviewStatus: nextState.reviewStatus,
+      },
+    };
+  }
+
+  if (shouldUseSqlite()) {
+    const taskId = getTaskIdByReportIdFromSqlite(reportId);
+    if (!taskId) throw new Error('报告不存在');
+
+    const task = await getTask(taskId);
+    const cachedReport = getReportFromSqlite(reportId);
+    if (payload.action === 'approve' && cachedReport.gateResult.blockedReasons?.length) {
+      throw badRequest(`当前报告不满足发布门禁：${cachedReport.gateResult.blockedReasons.join('；')}`);
+    }
+
+    const nextTaskStatus = payload.action === 'approve' ? 'completed' : 'awaiting_review';
+    const nextReviewStatus = payload.action === 'approve' ? 'approved' : 'rework_required';
+    const nextReportStatus = payload.action === 'approve' ? 'approved' : 'rejected';
+    const nextReport = buildReportResponse({
+      ...cachedReport,
+      status: nextReportStatus,
+      reviewMeta,
+    });
+
+    const nextState: ResearchTaskState = {
+      ...task,
+      status: nextTaskStatus,
+      reviewStatus: nextReviewStatus,
+      finalReports: task.finalReports.map((item) =>
+        item.id === reportId ? { ...item, status: nextReportStatus } : item,
+      ),
+    };
+
+    saveTaskToSqlite(nextState);
+    saveReportToSqlite(nextState.taskId, nextReport);
+
+    return {
+      report: nextReport,
       task: {
         taskId: nextState.taskId,
         status: nextState.status,

@@ -10,10 +10,18 @@
   "scripts": {
     "dev:web": "npm --workspace @users-research/web run dev",
     "dev:server": "npm --workspace @users-research/server run dev",
-    "build": "npm run build --workspaces",
-    "typecheck": "npm run typecheck --workspaces"
+    "stack:start": "bash scripts/dev-stack.sh start",
+    "stack:stop": "bash scripts/dev-stack.sh stop",
+    "stack:restart": "bash scripts/dev-stack.sh restart",
+    "stack:status": "bash scripts/dev-stack.sh status",
+    "build": "npm run build --workspace @users-research/shared --workspace @users-research/model-clients --workspace @users-research/server --workspace @users-research/web",
+    "typecheck": "npm run typecheck --workspace @users-research/shared --workspace @users-research/model-clients --workspace @users-research/server --workspace @users-research/web",
+    "check": "npm run typecheck && npm run build",
+    "smoke:server": "node scripts/smoke-server.mjs",
+    "smoke:server:real": "node scripts/smoke-server.mjs real",
+    "smoke:rerun": "node scripts/smoke-rerun.mjs"
   },
-  "dependencies": {
-    "@esbuild/win32-x64": "0.27.4"
+  "devDependencies": {
+    "@esbuild/darwin-arm64": "^0.27.4"
   }
 }

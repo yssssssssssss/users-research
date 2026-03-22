@@ -1,10 +1,14 @@
-﻿import Fastify from 'fastify';
-import { appConfig } from './config/env';
-import { apiRoutes } from './routes';
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import { appConfig } from './config/env.js';
+import { apiRoutes } from './routes/index.js';
 
 export const buildServer = () => {
   const app = Fastify({ logger: appConfig.env === 'development' });
 
+  app.register(cors, {
+    origin: appConfig.server.corsOrigin,
+  });
   app.register(apiRoutes);
 
   app.setErrorHandler((error, _request, reply) => {
