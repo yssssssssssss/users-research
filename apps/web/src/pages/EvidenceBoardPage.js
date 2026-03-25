@@ -1,8 +1,9 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Card, Empty, Space, Statistic, Typography, message } from 'antd';
+import { Alert, Card, Empty, List, Space, Statistic, Tag, Typography, message } from 'antd';
 import { RouteLoading } from '../components/RouteLoading';
 import { api } from '../lib/api';
+import { getEvidenceAuthenticityKind } from '../lib/evidenceMeta';
 import { useTaskStore } from '../store/taskStore';
 const { Title, Paragraph, Link, Text } = Typography;
 const EvidenceReviewTable = lazy(() => import('../components/evidence/EvidenceReviewTable').then((module) => ({ default: module.EvidenceReviewTable })));
@@ -125,12 +126,31 @@ export const EvidenceBoardPage = () => {
         { label: 'T3', value: 'T3' },
     ], []);
     const handleReview = async (item, reviewStatus) => {
+        const nextTier = tierDrafts[item.id] || item.tier;
+        const authenticity = getEvidenceAuthenticityKind(item);
+        const requiresPromotionReason = item.sourceLevel === 'external' &&
+            reviewStatus === 'accepted' &&
+            (nextTier === 'T1' || nextTier === 'T2');
+        let comment;
+        if (requiresPromotionReason) {
+            if (authenticity === 'search_result') {
+                message.error('搜索线索在未抓到原始内容前，不能直接提升为 T1/T2。');
+                return;
+            }
+            const input = window.prompt(`请输入将该外部证据提升为 ${nextTier} 的复核理由（至少 8 个字，会写入审核记录）：`);
+            if (!input || input.trim().length < 8) {
+                message.warning('已取消提交：请填写不少于 8 个字的复核理由。');
+                return;
+            }
+            comment = input.trim();
+        }
         setSubmittingId(item.id);
         try {
             const result = await api.reviewEvidence(item.id, {
                 reviewStatus,
-                tier: tierDrafts[item.id] || item.tier,
+                tier: nextTier,
                 reviewer: 'evidence_board',
+                comment,
             });
             await loadEvidence();
             if (result.recomputeStatus === 'queued') {
@@ -150,5 +170,7 @@ export const EvidenceBoardPage = () => {
     if (!currentTaskId) {
         return _jsx(Empty, { description: "\u8BF7\u5148\u521B\u5EFA\u4EFB\u52A1" });
     }
-    return (_jsxs(Space, { direction: "vertical", size: 24, style: { width: '100%' }, children: [_jsx(Title, { level: 2, children: "\u8BC1\u636E\u770B\u677F" }), isRecomputing ? (_jsx(Alert, { type: "info", showIcon: true, message: "\u540E\u53F0\u6B63\u5728\u91CD\u7B97\u7EFC\u5408\u5224\u65AD\uFF0C\u65B0\u7684\u8BC1\u636E\u590D\u6838\u5DF2\u4E34\u65F6\u9501\u5B9A", description: _jsxs(Space, { direction: "vertical", size: 4, children: [_jsx(Text, { children: "\u7CFB\u7EDF\u6B63\u5728\u91CD\u65B0\u8BA1\u7B97 RQ\u3001\u5019\u9009\u8F93\u51FA\u4E0E\u670D\u52A1\u7AEF Gate\uFF0C\u8BF7\u7B49\u5F85\u5F53\u524D\u91CD\u7B97\u7ED3\u675F\u540E\u518D\u7EE7\u7EED\u63D0\u4EA4\u3002" }), _jsxs(Text, { type: "secondary", children: ["\u5F53\u524D\u8F6E\u8BE2\uFF1A\u7B2C ", pollAttempt || 1, "/", MAX_RECOMPUTE_POLL_ATTEMPTS, " \u6B21\uFF1B \u9884\u8BA1 ", nextRefreshIn.toFixed(1), " \u79D2\u540E\u81EA\u52A8\u5237\u65B0\u3002"] }), taskSummary?.stats.warnings?.length ? (_jsxs(Text, { type: "secondary", children: ["\u4EFB\u52A1\u63D0\u9192\uFF1A", taskSummary.stats.warnings.join('；')] })) : null] }) })) : null, _jsxs("div", { className: "metric-grid", children: [_jsx(Card, { children: _jsx(Statistic, { title: "\u8BC1\u636E\u603B\u6570", value: summary.total }) }), _jsx(Card, { children: _jsx(Statistic, { title: "T1 \u8BC1\u636E", value: summary.tier1 }) }), _jsx(Card, { children: _jsx(Statistic, { title: "T2 \u8BC1\u636E", value: summary.tier2 }) }), _jsx(Card, { children: _jsx(Statistic, { title: "T3 \u7EBF\u7D22", value: summary.tier3 }) }), _jsx(Card, { children: _jsx(Statistic, { title: "\u51B2\u7A81\u7EC4", value: summary.conflictCount }) })] }), _jsxs(Card, { className: "page-card", children: [_jsx(Paragraph, { children: "\u672C\u9875\u7528\u4E8E\u67E5\u770B\u8BC1\u636E\u6765\u6E90\u3001Tier \u5206\u7EA7\u3001\u5F15\u7528\u4F4D\u7F6E\u4E0E\u4EBA\u5DE5\u590D\u6838\u72B6\u6001\u3002 \u5F53\u590D\u6838\u89E6\u53D1\u540E\u53F0\u91CD\u7B97\u65F6\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u9501\u5B9A\u65B0\u7684\u590D\u6838\u63D0\u4EA4\uFF0C\u5E76\u5468\u671F\u6027\u5237\u65B0\u4EFB\u52A1\u72B6\u6001\u3002" }), _jsx(Suspense, { fallback: _jsx(RouteLoading, {}), children: _jsx(EvidenceReviewTable, { items: items, tierColorMap: tierColorMap, reviewColorMap: reviewColorMap, reviewLabelMap: reviewLabelMap, tierDrafts: tierDrafts, tierOptions: tierOptions, actionLocked: actionLocked, submittingId: submittingId, isRecomputing: isRecomputing, onTierChange: (itemId, value) => setTierDrafts((prev) => ({ ...prev, [itemId]: value })), onReview: handleReview }) })] })] }));
+    const searchPlan = taskState?.analysisPlan?.externalSearchPlan;
+    const searchResult = taskState?.moduleResults?.externalSearch;
+    return (_jsxs(Space, { direction: "vertical", size: 24, style: { width: '100%' }, children: [_jsx(Title, { level: 2, children: "\u5916\u90E8\u68C0\u7D22 / \u8BC1\u636E" }), searchPlan ? (_jsx(Card, { className: "page-card", title: "\u672C\u6A21\u5757\u4EFB\u52A1", children: _jsxs(Space, { direction: "vertical", size: 12, style: { width: '100%' }, children: [_jsx(Paragraph, { style: { marginBottom: 0 }, children: searchPlan.task }), _jsxs("div", { children: [_jsx(Text, { strong: true, children: "\u68C0\u7D22\u67E5\u8BE2" }), _jsx(Space, { wrap: true, style: { marginTop: 8 }, children: searchPlan.searchQueries.map((item) => _jsx(Tag, { color: "blue", children: item }, item)) })] }), searchResult?.keyInsights?.length ? (_jsxs("div", { children: [_jsx(Text, { strong: true, children: "\u7ED3\u6784\u5316\u6D1E\u5BDF" }), _jsx(List, { size: "small", dataSource: searchResult.keyInsights, renderItem: (item) => (_jsx(List.Item, { children: _jsxs(Space, { wrap: true, children: [_jsx("span", { children: item.insight }), _jsx(Tag, { children: item.source }), _jsx(Tag, { color: item.confidence === 'high' ? 'green' : item.confidence === 'medium' ? 'gold' : 'red', children: item.confidence }), _jsx(Tag, { children: item.tier })] }) })) })] })) : null] }) })) : null, isRecomputing ? (_jsx(Alert, { type: "info", showIcon: true, message: "\u540E\u53F0\u6B63\u5728\u91CD\u7B97\u7EFC\u5408\u5224\u65AD\uFF0C\u65B0\u7684\u8BC1\u636E\u590D\u6838\u5DF2\u4E34\u65F6\u9501\u5B9A", description: _jsxs(Space, { direction: "vertical", size: 4, children: [_jsx(Text, { children: "\u7CFB\u7EDF\u6B63\u5728\u91CD\u65B0\u8BA1\u7B97 RQ\u3001\u5019\u9009\u8F93\u51FA\u4E0E\u670D\u52A1\u7AEF Gate\uFF0C\u8BF7\u7B49\u5F85\u5F53\u524D\u91CD\u7B97\u7ED3\u675F\u540E\u518D\u7EE7\u7EED\u63D0\u4EA4\u3002" }), _jsxs(Text, { type: "secondary", children: ["\u5F53\u524D\u8F6E\u8BE2\uFF1A\u7B2C ", pollAttempt || 1, "/", MAX_RECOMPUTE_POLL_ATTEMPTS, " \u6B21\uFF1B \u9884\u8BA1 ", nextRefreshIn.toFixed(1), " \u79D2\u540E\u81EA\u52A8\u5237\u65B0\u3002"] }), taskSummary?.stats.warnings?.length ? (_jsxs(Text, { type: "secondary", children: ["\u4EFB\u52A1\u63D0\u9192\uFF1A", taskSummary.stats.warnings.join('；')] })) : null] }) })) : null, _jsxs("div", { className: "metric-grid", children: [_jsx(Card, { children: _jsx(Statistic, { title: "\u8BC1\u636E\u603B\u6570", value: summary.total }) }), _jsx(Card, { children: _jsx(Statistic, { title: "T1 \u8BC1\u636E", value: summary.tier1 }) }), _jsx(Card, { children: _jsx(Statistic, { title: "T2 \u8BC1\u636E", value: summary.tier2 }) }), _jsx(Card, { children: _jsx(Statistic, { title: "T3 \u7EBF\u7D22", value: summary.tier3 }) }), _jsx(Card, { children: _jsx(Statistic, { title: "\u51B2\u7A81\u7EC4", value: summary.conflictCount }) })] }), _jsxs(Card, { className: "page-card", children: [_jsx(Paragraph, { children: "\u672C\u9875\u7528\u4E8E\u67E5\u770B\u8BC1\u636E\u6765\u6E90\u3001Tier \u5206\u7EA7\u3001\u5F15\u7528\u4F4D\u7F6E\u4E0E\u4EBA\u5DE5\u590D\u6838\u72B6\u6001\u3002 \u5F53\u590D\u6838\u89E6\u53D1\u540E\u53F0\u91CD\u7B97\u65F6\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u9501\u5B9A\u65B0\u7684\u590D\u6838\u63D0\u4EA4\uFF0C\u5E76\u5468\u671F\u6027\u5237\u65B0\u4EFB\u52A1\u72B6\u6001\u3002" }), _jsx(Alert, { type: "info", showIcon: true, style: { marginBottom: 16 }, message: "\u5916\u90E8\u8BC1\u636E\u5347\u9636\u89C4\u5219", description: "\u641C\u7D22\u7EBF\u7D22\u4E0D\u80FD\u76F4\u63A5\u5347\u4E3A T1/T2\uFF1B\u53EA\u6709\u5DF2\u6293\u7F51\u9875\u6B63\u6587\u6216\u5DF2\u6293\u6587\u6863\u5185\u5BB9\u7684\u5916\u90E8\u8BC1\u636E\uFF0C\u624D\u5141\u8BB8\u5728\u586B\u5199\u590D\u6838\u7406\u7531\u540E\u5347\u9636\u3002" }), _jsx(Suspense, { fallback: _jsx(RouteLoading, {}), children: _jsx(EvidenceReviewTable, { items: items, tierColorMap: tierColorMap, reviewColorMap: reviewColorMap, reviewLabelMap: reviewLabelMap, tierDrafts: tierDrafts, tierOptions: tierOptions, actionLocked: actionLocked, submittingId: submittingId, isRecomputing: isRecomputing, onTierChange: (itemId, value) => setTierDrafts((prev) => ({ ...prev, [itemId]: value })), onReview: handleReview }) })] })] }));
 };

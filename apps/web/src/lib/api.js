@@ -10,6 +10,9 @@ const request = async (input, init) => {
     });
     if (!response.ok) {
         let message = `请求失败：${response.status}`;
+        if (response.status === 413) {
+            message = '上传文件过大：当前上传链路会把图片编码成请求体，请压缩图片后重试，或联系管理员提高上传上限。';
+        }
         try {
             const payload = await response.json();
             if (payload && typeof payload.message === 'string') {
@@ -25,6 +28,10 @@ const request = async (input, init) => {
 };
 export const api = {
     createTask: (payload) => request('/api/research/tasks', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }),
+    uploadAsset: (payload) => request('/api/uploads', {
         method: 'POST',
         body: JSON.stringify(payload),
     }),

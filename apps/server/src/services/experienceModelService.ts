@@ -1,7 +1,60 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { EvidenceItem, ResearchTaskState } from '@users-research/shared';
+import type { AnalysisPlan, EvidenceItem, ExperienceModelEvaluation, ExperienceModelResult, ResearchTaskState } from '@users-research/shared';
+import { modelGateway } from './modelGateway.js';
+import { buildExperienceModelPrompt } from '../prompts/experienceModel.js';
+
+
+const extractJsonBlock = (raw: string): string => {
+  const fenced = raw.match(/```json\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) return fenced[1].trim();
+  const objectMatch = raw.match(/\{[\s\S]*\}/);
+  if (objectMatch?.[0]) return objectMatch[0];
+  return raw.trim();
+};
+
+const safeParseJson = <T>(raw: string): T | null => {
+  try {
+    return JSON.parse(extractJsonBlock(raw)) as T;
+  } catch {
+    return null;
+  }
+};
+
+const buildArtifactSummary = (
+  task: Pick<ResearchTaskState, 'title' | 'originalQuery' | 'inputType' | 'uploadedDesigns'>,
+): string => {
+  const designNames = task.uploadedDesigns.map((item) => item.fileName).filter(Boolean).slice(0, 3);
+  return [
+    task.title ? `任务标题：${task.title}` : undefined,
+    `用户问题：${task.originalQuery}`,
+    `输入类型：${task.inputType}`,
+    designNames.length ? `设计文件：${designNames.join('、')}` : undefined,
+  ]
+    .filter(Boolean)
+    .join('；');
+};
+
+interface ExperienceModelEvaluationPayload {
+  modelId?: string;
+  modelName?: string;
+  suitability?: string;
+  limitations?: string[];
+  dimensions?: Array<{
+    name?: string;
+    score?: number;
+    observation?: string;
+    rationale?: string;
+    suggestion?: string;
+  }>;
+  overallScore?: number;
+  strengths?: string[];
+  risks?: string[];
+  topPriorityFix?: string;
+  followupQuestions?: string[];
+  evidenceBoundary?: string;
+}
 
 interface ExperienceModelProfile {
   id: string;
@@ -446,7 +499,8 @@ export const analyzeExperienceModels = async (
     'title' | 'originalQuery' | 'taskMode' | 'inputType' | 'uploadedDesigns'
   >,
   preferredModelIds?: string[],
-): Promise<{ evidenceItems: EvidenceItem[]; warnings: string[] }> => {
+  analysisPlan?: AnalysisPlan,
+): Promise<{ evidenceItems: EvidenceItem[]; warnings: string[]; result: ExperienceModelResult }> => {
   const warnings: string[] = [];
   const taskFingerprint = buildTaskFingerprint(task);
   const indexDocument = readPdfText(EXPERIENCE_MODEL_INDEX_FILE);
@@ -485,9 +539,123 @@ export const analyzeExperienceModels = async (
     };
   });
 
+  const artifactSummary = buildArtifactSummary(task);
+  const evaluations: ExperienceModelEvaluation[] = [];
+
+  for (const profile of modelsToUse) {
+    const modelDocument = readPdfText(profile.filename);
+    const promptSpec = buildExperienceModelPrompt({
+      plan: analysisPlan || {
+        coreGoal: task.originalQuery,
+        artifactType: task.inputType === 'text' ? 'copy' : 'ui_design',
+        evaluationFocus: inferTaskFocus(task),
+        targetAudience: '核心目标用户',
+        businessContext: task.taskMode,
+        experienceModelPlan: {
+          task: `使用 ${profile.name} 评估当前稿件`,
+          focusDimensions: profile.dimensions,
+          preferredModelIds: [profile.id],
+          evaluationQuestions: profile.questionPrompts,
+        },
+        externalSearchPlan: { task: '', searchQueries: [], searchIntent: '', expectedInsights: [] },
+        visualReviewPlan: { task: '', reviewDimensions: [], businessGoal: '', keyConcerns: [] },
+        personaSimulationPlan: { task: '', personaTypes: [], simulationScenarios: [], ratingDimensions: [] },
+        subQuestions: [],
+      },
+      artifactSummary,
+      modelName: profile.name,
+      modelDocumentSummary: modelDocument.text || profile.summary,
+      dimensions: profile.dimensions,
+    });
+
+    if (!modelGateway.isTextModelEnabled()) {
+      evaluations.push({
+        modelId: profile.id,
+        modelName: profile.name,
+        suitability: profile.summary,
+        limitations: ['当前未启用文本模型，已退回到框架摘要模式。'],
+        dimensions: profile.dimensions.map((name) => ({
+          name,
+          observation: `当前仅基于 ${profile.name} 框架摘要给出方法论视角。`,
+          rationale: profile.core,
+          suggestion: profile.questionPrompts[0],
+        })),
+        overallScore: undefined,
+        strengths: [profile.summary],
+        risks: ['缺少针对当前稿件的逐维度 LLM 评估。'],
+        topPriorityFix: profile.questionPrompts[0],
+        followupQuestions: profile.questionPrompts,
+        evidenceBoundary: 'T3_framework_inference',
+      });
+      continue;
+    }
+
+    try {
+      const raw = await modelGateway.runExperienceEvaluator({
+        systemPrompt: promptSpec.systemPrompt,
+        prompt: promptSpec.prompt,
+      });
+      const parsed = safeParseJson<ExperienceModelEvaluationPayload>(raw);
+      if (!parsed) throw new Error('experience evaluator 返回无法解析');
+      evaluations.push({
+        modelId: parsed.modelId || profile.id,
+        modelName: parsed.modelName || profile.name,
+        suitability: parsed.suitability || profile.summary,
+        limitations: Array.isArray(parsed.limitations) ? parsed.limitations.filter((v): v is string => typeof v === 'string') : [],
+        dimensions: Array.isArray(parsed.dimensions)
+          ? parsed.dimensions.map((item) => ({
+              name: item.name || '未命名维度',
+              score: typeof item.score === 'number' ? item.score : undefined,
+              observation: item.observation || '未提供观察',
+              rationale: item.rationale,
+              suggestion: item.suggestion,
+            }))
+          : profile.dimensions.map((name) => ({ name, observation: '未提供观察' })),
+        overallScore: typeof parsed.overallScore === 'number' ? parsed.overallScore : undefined,
+        strengths: Array.isArray(parsed.strengths) ? parsed.strengths.filter((v): v is string => typeof v === 'string') : [],
+        risks: Array.isArray(parsed.risks) ? parsed.risks.filter((v): v is string => typeof v === 'string') : [],
+        topPriorityFix: parsed.topPriorityFix,
+        followupQuestions: Array.isArray(parsed.followupQuestions) ? parsed.followupQuestions.filter((v): v is string => typeof v === 'string') : profile.questionPrompts,
+        evidenceBoundary: parsed.evidenceBoundary || 'T3_framework_inference',
+      });
+    } catch (error) {
+      warnings.push(`${profile.name} 逐维度评估失败，已退回到框架摘要：${error instanceof Error ? error.message : String(error)}`);
+      evaluations.push({
+        modelId: profile.id,
+        modelName: profile.name,
+        suitability: profile.summary,
+        limitations: ['模型评估失败，当前结果退回为框架摘要。'],
+        dimensions: profile.dimensions.map((name) => ({
+          name,
+          observation: `当前仅基于 ${profile.name} 框架摘要给出方法论视角。`,
+          rationale: profile.core,
+          suggestion: profile.questionPrompts[0],
+        })),
+        overallScore: undefined,
+        strengths: [profile.summary],
+        risks: ['缺少针对当前稿件的逐维度 LLM 评估。'],
+        topPriorityFix: profile.questionPrompts[0],
+        followupQuestions: profile.questionPrompts,
+        evidenceBoundary: 'T3_framework_inference',
+      });
+    }
+  }
+
   warnings.push('体验模型分析用于补充方法论视角，不应直接视为 T1 事实证据。');
 
-  return { evidenceItems, warnings };
+  return {
+    evidenceItems,
+    warnings,
+    result: {
+      task: analysisPlan?.experienceModelPlan.task || '体验模型评估',
+      selectedModelIds: modelsToUse.map((item) => item.id),
+      selectedModelNames: modelsToUse.map((item) => item.name),
+      focusDimensions: analysisPlan?.experienceModelPlan.focusDimensions || modelsToUse.flatMap((item) => item.dimensions).slice(0, 6),
+      evaluations,
+      summary: evaluations[0]?.suitability,
+      warnings,
+    },
+  };
 };
 
 export const getExperienceModelBranchName = (): string => 'experience_model_router';

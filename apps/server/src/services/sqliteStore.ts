@@ -159,6 +159,31 @@ export const listTasksFromSqlite = (limit = 20): ResearchTaskState[] => {
     .filter((item): item is ResearchTaskState => Boolean(item));
 };
 
+export const findTaskByEvidenceIdFromSqlite = (
+  evidenceId: string,
+): { task: ResearchTaskState; evidenceIndex: number } | undefined => {
+  const db = getSqliteDb();
+  const row = db
+    .prepare(`
+      SELECT state_json
+      FROM task_snapshots
+      WHERE state_json LIKE ?
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `)
+    .get(`%${JSON.stringify(evidenceId).slice(1, -1)}%`) as { state_json: string } | undefined;
+
+  if (!row) return undefined;
+
+  const task = parseJson<ResearchTaskState | undefined>(row.state_json, undefined);
+  if (!task) return undefined;
+
+  const evidenceIndex = task.evidencePool.findIndex((item) => item.id === evidenceId);
+  if (evidenceIndex < 0) return undefined;
+
+  return { task, evidenceIndex };
+};
+
 export const saveReportToSqlite = (taskId: string, report: ReportResponse): ReportResponse => {
   const db = getSqliteDb();
   db.prepare(`

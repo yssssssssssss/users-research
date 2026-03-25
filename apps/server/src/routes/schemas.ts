@@ -32,6 +32,22 @@ const fileInputSchema = {
     ossKey: { type: 'string', minLength: 1 },
     sourceUrl: { type: 'string', minLength: 1 },
     mimeType: { type: 'string', minLength: 1 },
+    dataUrl: { type: 'string', minLength: 1 },
+    localPath: { type: 'string', minLength: 1 },
+    sizeBytes: { type: 'number', minimum: 0 },
+    sha256: { type: 'string', minLength: 1 },
+  },
+  additionalProperties: false,
+} as const;
+
+export const uploadAssetBodySchema = {
+  type: 'object',
+  required: ['fileName', 'fileType', 'dataUrl'],
+  properties: {
+    fileName: { type: 'string', minLength: 1 },
+    fileType: { type: 'string', enum: [...fileTypeEnum] },
+    mimeType: { type: 'string', minLength: 1 },
+    dataUrl: { type: 'string', minLength: 1 },
   },
   additionalProperties: false,
 } as const;

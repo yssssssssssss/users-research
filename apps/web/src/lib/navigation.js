@@ -4,6 +4,7 @@ export const TASK_HISTORY_PATH = '/tasks';
 export const TASK_NEW_PATH = '/tasks/new';
 export const TASK_DETAIL_ROOT_PATH = '/tasks';
 export const TASK_DETAIL_SECTION_OVERVIEW = 'overview';
+export const TASK_DETAIL_SECTION_EXPERIENCE = 'experience';
 export const TASK_DETAIL_SECTION_EVIDENCE = 'evidence';
 export const TASK_DETAIL_SECTION_VISION = 'vision';
 export const TASK_DETAIL_SECTION_PERSONA = 'persona';
@@ -12,6 +13,7 @@ export const TASK_DETAIL_SECTION_REPORT = 'report';
 export const TASK_DETAIL_SECTION_OPS = 'ops';
 export const buildTaskDetailPath = (taskId, section = TASK_DETAIL_SECTION_OVERVIEW) => `${TASK_DETAIL_ROOT_PATH}/${encodeURIComponent(taskId)}/${section}`;
 export const TASK_DETAIL_OVERVIEW_PATH = (taskId) => buildTaskDetailPath(taskId, TASK_DETAIL_SECTION_OVERVIEW);
+export const TASK_DETAIL_EXPERIENCE_PATH = (taskId) => buildTaskDetailPath(taskId, TASK_DETAIL_SECTION_EXPERIENCE);
 export const TASK_DETAIL_EVIDENCE_PATH = (taskId) => buildTaskDetailPath(taskId, TASK_DETAIL_SECTION_EVIDENCE);
 export const TASK_DETAIL_VISION_PATH = (taskId) => buildTaskDetailPath(taskId, TASK_DETAIL_SECTION_VISION);
 export const TASK_DETAIL_PERSONA_PATH = (taskId) => buildTaskDetailPath(taskId, TASK_DETAIL_SECTION_PERSONA);
@@ -21,6 +23,7 @@ export const TASK_DETAIL_OPS_PATH = (taskId) => buildTaskDetailPath(taskId, TASK
 const legacyTaskPaths = new Set([
     '/current',
     '/workbench',
+    '/experience',
     '/evidence',
     '/vision',
     '/persona',
@@ -43,6 +46,8 @@ export const isTaskDetailPath = (pathname) => {
 };
 export const getTaskDetailTabKey = (pathname) => {
     const section = pathname.split('/').filter(Boolean).at(-1);
+    if (section === TASK_DETAIL_SECTION_EXPERIENCE)
+        return TASK_DETAIL_SECTION_EXPERIENCE;
     if (section === TASK_DETAIL_SECTION_EVIDENCE)
         return TASK_DETAIL_SECTION_EVIDENCE;
     if (section === TASK_DETAIL_SECTION_VISION)

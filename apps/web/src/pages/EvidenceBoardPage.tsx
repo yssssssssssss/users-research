@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Card, Empty, Space, Statistic, Typography, message } from 'antd';
+import { Alert, Card, Empty, List, Space, Statistic, Tag, Typography, message } from 'antd';
 import type { EvidenceItem, ResearchTaskState, TierLevel } from '@users-research/shared';
 import { RouteLoading } from '../components/RouteLoading';
 import { api } from '../lib/api';
+import { getEvidenceAuthenticityKind } from '../lib/evidenceMeta';
 import { useTaskStore } from '../store/taskStore';
 
 const { Title, Paragraph, Link, Text } = Typography;
@@ -156,12 +157,39 @@ export const EvidenceBoardPage = () => {
     item: EvidenceItem,
     reviewStatus: EvidenceItem['reviewStatus'],
   ) => {
+    const nextTier = tierDrafts[item.id] || item.tier;
+    const authenticity = getEvidenceAuthenticityKind(item);
+    const requiresPromotionReason =
+      item.sourceLevel === 'external' &&
+      reviewStatus === 'accepted' &&
+      (nextTier === 'T1' || nextTier === 'T2');
+
+    let comment: string | undefined;
+    if (requiresPromotionReason) {
+      if (authenticity === 'search_result') {
+        message.error('搜索线索在未抓到原始内容前，不能直接提升为 T1/T2。');
+        return;
+      }
+
+      const input = window.prompt(
+        `请输入将该外部证据提升为 ${nextTier} 的复核理由（至少 8 个字，会写入审核记录）：`,
+      );
+
+      if (!input || input.trim().length < 8) {
+        message.warning('已取消提交：请填写不少于 8 个字的复核理由。');
+        return;
+      }
+
+      comment = input.trim();
+    }
+
     setSubmittingId(item.id);
     try {
       const result = await api.reviewEvidence(item.id, {
         reviewStatus,
-        tier: tierDrafts[item.id] || item.tier,
+        tier: nextTier,
         reviewer: 'evidence_board',
+        comment,
       });
       await loadEvidence();
 
@@ -183,9 +211,47 @@ export const EvidenceBoardPage = () => {
     return <Empty description="请先创建任务" />;
   }
 
+  const searchPlan = taskState?.analysisPlan?.externalSearchPlan;
+  const searchResult = taskState?.moduleResults?.externalSearch;
+
   return (
     <Space direction="vertical" size={24} style={{ width: '100%' }}>
-      <Title level={2}>证据看板</Title>
+      <Title level={2}>外部检索 / 证据</Title>
+
+      {searchPlan ? (
+        <Card className="page-card" title="本模块任务">
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Paragraph style={{ marginBottom: 0 }}>{searchPlan.task}</Paragraph>
+            <div>
+              <Text strong>检索查询</Text>
+              <Space wrap style={{ marginTop: 8 }}>
+                {searchPlan.searchQueries.map((item) => <Tag color="blue" key={item}>{item}</Tag>)}
+              </Space>
+            </div>
+            {searchResult?.keyInsights?.length ? (
+              <div>
+                <Text strong>结构化洞察</Text>
+                <List
+                  size="small"
+                  dataSource={searchResult.keyInsights}
+                  renderItem={(item: { insight: string; source: string; confidence: 'high' | 'medium' | 'low'; tier: TierLevel }) => (
+                    <List.Item>
+                      <Space wrap>
+                        <span>{item.insight}</span>
+                        <Tag>{item.source}</Tag>
+                        <Tag color={item.confidence === 'high' ? 'green' : item.confidence === 'medium' ? 'gold' : 'red'}>
+                          {item.confidence}
+                        </Tag>
+                        <Tag>{item.tier}</Tag>
+                      </Space>
+                    </List.Item>
+                  )}
+                />
+              </div>
+            ) : null}
+          </Space>
+        </Card>
+      ) : null}
 
       {isRecomputing ? (
         <Alert
@@ -220,6 +286,13 @@ export const EvidenceBoardPage = () => {
           本页用于查看证据来源、Tier 分级、引用位置与人工复核状态。
           当复核触发后台重算时，系统会自动锁定新的复核提交，并周期性刷新任务状态。
         </Paragraph>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="外部证据升阶规则"
+          description="搜索线索不能直接升为 T1/T2；只有已抓网页正文或已抓文档内容的外部证据，才允许在填写复核理由后升阶。"
+        />
         <Suspense fallback={<RouteLoading />}>
           <EvidenceReviewTable
             items={items}

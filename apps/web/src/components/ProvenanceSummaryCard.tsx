@@ -51,6 +51,11 @@ export const ProvenanceSummaryCard = ({ summary }: ProvenanceSummaryCardProps) =
           </Col>
           <Col xs={12} md={8} xl={4}>
             <Card size="small">
+              <Statistic title="已抓内容" value={summary.fetchedArticleEvidenceCount} />
+            </Card>
+          </Col>
+          <Col xs={12} md={8} xl={4}>
+            <Card size="small">
               <Statistic title="框架证据" value={summary.frameworkEvidenceCount} />
             </Card>
           </Col>

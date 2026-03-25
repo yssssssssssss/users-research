@@ -23,6 +23,94 @@ body {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
+}
+
+.task-warning-collapse {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.task-warning-collapse .ant-collapse-item {
+  border: none !important;
+}
+
+.task-warning-collapse .ant-collapse-header {
+  align-items: flex-start !important;
+}
+
+.task-warning-collapse .ant-collapse-content-box {
+  padding-top: 0 !important;
+}
+
+.task-warning-collapse-warning {
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+}
+
+.task-warning-collapse-info {
+  background: #e6f4ff;
+  border: 1px solid #91caff;
+}
+
+.content-wrap-safe {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.content-wrap-safe-pre {
+  white-space: pre-wrap;
+}
+
+.content-block-safe {
+  width: 100%;
+  min-width: 0;
+}
+
+.evidence-review-section + .evidence-review-section {
+  padding-top: 4px;
+}
+
+.evidence-review-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.evidence-review-card {
+  border-radius: 12px;
+}
+
+.evidence-review-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.evidence-review-card-tags {
+  justify-content: flex-end;
+}
+
+.evidence-review-card-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 16px;
+}
+
+.evidence-review-card-side {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+}
+
+@media (max-width: 1440px) {
+  .evidence-review-card-layout {
+    grid-template-columns: 1fr;
+  }
 }

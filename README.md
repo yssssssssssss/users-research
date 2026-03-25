@@ -96,10 +96,19 @@ npm install
 
 说明：
 
-- 配置 `DATABASE_URL` 时，后端启用 Prisma 持久化
 - 不配置 `DATABASE_URL` 时，后端使用内存存储，适合本地联调
+- 配置 `DATABASE_URL=file:apps/server/tmp/users-research.sqlite` 时，启用 SQLite 持久化
+- 配置 `DATABASE_URL` 为 PostgreSQL 连接串时，持久化模式切到 PostgreSQL
 
 ### 3. 启动服务
+
+推荐直接用脚本：
+
+```bash
+npm run stack:start
+```
+
+或分别启动：
 
 ```bash
 npm run dev:server
@@ -110,6 +119,55 @@ npm run dev:web
 
 - Web：`http://localhost:5173`
 - Server：`http://127.0.0.1:8787`
+
+若默认端口已被占用，`npm run stack:start` 会自动顺延到下一个可用端口，并在启动完成后打印实际地址；可用 `npm run stack:status` 查看当前端口。
+
+停止 / 查看状态：
+
+```bash
+npm run stack:stop
+npm run stack:status
+```
+
+---
+
+## 本地验证脚本
+
+### 1. 基础链路 smoke
+
+```bash
+npm run smoke:server
+```
+
+### 2. SQLite 持久化 smoke
+
+会自动执行：
+
+- 创建任务
+- 运行完整流程
+- 生成报告
+- 重启 server
+- 再次读取任务 / 输出 / 报告
+- 验证 SQLite 文件确实落盘
+
+```bash
+npm run smoke:persistence
+```
+
+真实模式（依赖真实模型 / 检索配置）：
+
+先检查真实模式配置是否齐全：
+
+```bash
+npm run smoke:preflight
+```
+
+再执行：
+
+```bash
+npm run smoke:server:real
+npm run smoke:persistence:real
+```
 
 ---
 

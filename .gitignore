@@ -13,3 +13,5 @@ apps/server/prisma/dev.db-journal
 *.tsbuildinfo
 tmp/*.sqlite
 tmp/*.sqlite-*
+harness-progress.txt
+harness-tasks.json

@@ -1,5 +1,7 @@
-import { Alert, Card, Col, Row, Space, Statistic, Tag, Typography } from 'antd';
+import { Card, Col, Collapse, Row, Space, Statistic, Tag, Typography } from 'antd';
+import type { ReactNode } from 'react';
 import type { TaskSummaryResponse } from '@users-research/shared';
+import { splitTaskWarnings } from '../lib/taskWarnings';
 
 const { Text } = Typography;
 
@@ -27,6 +29,13 @@ const reviewStatusLabelMap: Record<string, string> = {
   rework_required: '需返工',
 };
 
+type WarningPanelItem = {
+  key: string;
+  className: string;
+  label: ReactNode;
+  children: ReactNode;
+};
+
 export const CurrentTaskSummaryBar = ({ taskId, taskSummary }: CurrentTaskSummaryBarProps) => {
   if (!taskSummary) {
     return (
@@ -37,6 +46,43 @@ export const CurrentTaskSummaryBar = ({ taskId, taskSummary }: CurrentTaskSummar
         </Space>
       </Card>
     );
+  }
+
+  const warningGroups = splitTaskWarnings(taskSummary.stats.warnings);
+  const warningPanels: WarningPanelItem[] = [];
+
+  if (warningGroups.authenticityDowngrade.length) {
+    warningPanels.push({
+      key: 'authenticity-downgrade',
+      className: 'task-warning-collapse task-warning-collapse-warning',
+      label: (
+        <Text strong style={{ color: '#ad6800' }}>
+          真实性降级已触发
+        </Text>
+      ),
+      children: (
+        <Text className="content-wrap-safe">
+          {warningGroups.authenticityDowngrade.join('；')}
+        </Text>
+      ),
+    });
+  }
+
+  if (warningGroups.otherWarnings.length) {
+    warningPanels.push({
+      key: 'other-warnings',
+      className: 'task-warning-collapse task-warning-collapse-info',
+      label: (
+        <Text strong style={{ color: '#0958d9' }}>
+          该任务存在其他提醒
+        </Text>
+      ),
+      children: (
+        <Text className="content-wrap-safe">
+          {warningGroups.otherWarnings.join('；')}
+        </Text>
+      ),
+    });
   }
 
   return (
@@ -68,14 +114,9 @@ export const CurrentTaskSummaryBar = ({ taskId, taskSummary }: CurrentTaskSummar
         </Space>
       </Card>
 
-      {taskSummary.stats.warnings.length ? (
-        <Alert
-          type="warning"
-          showIcon
-          message="该任务存在提醒"
-          description={taskSummary.stats.warnings.join('；')}
-        />
-      ) : null}
+      {warningPanels.map((panel) => (
+        <Collapse key={panel.key} size="small" ghost items={[panel]} />
+      ))}
     </Space>
   );
 };

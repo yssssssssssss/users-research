@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   CreateTaskRequest,
   EvidenceListResponse,
   ExperienceModelCatalogItem,
@@ -13,9 +13,11 @@
   ReviewReportRequest,
   ReviewReportResponse,
   SubQuestionsResponse,
-  TaskSnapshotResponse,
   TaskListResponse,
+  TaskSnapshotResponse,
   TaskSummaryResponse,
+  UploadAssetRequest,
+  UploadAssetResponse,
   VisionResponse,
 } from '@users-research/shared';
 
@@ -35,6 +37,9 @@ const request = async <T>(input: string, init?: RequestInit): Promise<T> => {
 
   if (!response.ok) {
     let message = `请求失败：${response.status}`;
+    if (response.status === 413) {
+      message = '上传文件过大：当前上传链路会把图片编码成请求体，请压缩图片后重试，或联系管理员提高上传上限。';
+    }
     try {
       const payload = await response.json();
       if (payload && typeof payload.message === 'string') {
@@ -52,6 +57,11 @@ const request = async <T>(input: string, init?: RequestInit): Promise<T> => {
 export const api = {
   createTask: (payload: CreateTaskRequest) =>
     request<{ taskId: string; status: string; createdAt: string }>('/api/research/tasks', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  uploadAsset: (payload: UploadAssetRequest) =>
+    request<UploadAssetResponse>('/api/uploads', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
@@ -81,10 +91,13 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   overrideExperienceModels: (taskId: string, payload: OverrideExperienceModelsRequest) =>
-    request<OverrideExperienceModelsResponse>(`/api/research/tasks/${taskId}/experience-models/override`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+    request<OverrideExperienceModelsResponse>(
+      `/api/research/tasks/${taskId}/experience-models/override`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    ),
   getVision: (taskId: string) => request<VisionResponse>(`/api/research/tasks/${taskId}/vision`),
   getPersona: (taskId: string) =>
     request<PersonaResponse>(`/api/research/tasks/${taskId}/persona`),

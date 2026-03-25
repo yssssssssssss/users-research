@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { CurrentTaskSummaryBar } from '../components/CurrentTaskSummaryBar';
 import { useTaskStore } from '../store/taskStore';
-import { buildTaskDetailPath, getTaskDetailTabKey, TASK_DETAIL_SECTION_EVIDENCE, TASK_DETAIL_SECTION_OPS, TASK_DETAIL_SECTION_OVERVIEW, TASK_DETAIL_SECTION_PERSONA, TASK_DETAIL_SECTION_REPORT, TASK_DETAIL_SECTION_RESULT, TASK_DETAIL_SECTION_VISION, TASK_HISTORY_PATH, TASK_NEW_PATH, } from '../lib/navigation';
+import { buildTaskDetailPath, getTaskDetailTabKey, TASK_DETAIL_SECTION_EXPERIENCE, TASK_DETAIL_SECTION_EVIDENCE, TASK_DETAIL_SECTION_OPS, TASK_DETAIL_SECTION_OVERVIEW, TASK_DETAIL_SECTION_PERSONA, TASK_DETAIL_SECTION_REPORT, TASK_DETAIL_SECTION_RESULT, TASK_DETAIL_SECTION_VISION, TASK_HISTORY_PATH, TASK_NEW_PATH, } from '../lib/navigation';
 const { Title, Paragraph, Text } = Typography;
 export const TaskDetailLayout = () => {
     const location = useLocation();
@@ -23,12 +23,13 @@ export const TaskDetailLayout = () => {
         setCurrentTaskId(routeTaskId);
     }, [currentTaskId, routeTaskId, setCurrentTaskId]);
     const tabItems = [
-        { key: TASK_DETAIL_SECTION_OVERVIEW, label: '总览' },
-        { key: TASK_DETAIL_SECTION_EVIDENCE, label: '证据看板' },
-        { key: TASK_DETAIL_SECTION_VISION, label: 'Vision Lab' },
-        { key: TASK_DETAIL_SECTION_PERSONA, label: 'Persona Lab' },
-        { key: TASK_DETAIL_SECTION_RESULT, label: '结果总览' },
-        { key: TASK_DETAIL_SECTION_REPORT, label: '综合报告' },
+        { key: TASK_DETAIL_SECTION_OVERVIEW, label: '总览 / 输入解析' },
+        { key: TASK_DETAIL_SECTION_EXPERIENCE, label: '体验模型' },
+        { key: TASK_DETAIL_SECTION_EVIDENCE, label: '外部检索 / 证据' },
+        { key: TASK_DETAIL_SECTION_VISION, label: '视觉评审' },
+        { key: TASK_DETAIL_SECTION_PERSONA, label: '模拟用户' },
+        { key: TASK_DETAIL_SECTION_RESULT, label: '综合结论' },
+        { key: TASK_DETAIL_SECTION_REPORT, label: '正式报告' },
         { key: TASK_DETAIL_SECTION_OPS, label: '审核与观测' },
     ].map((item) => ({
         ...item,
@@ -37,7 +38,7 @@ export const TaskDetailLayout = () => {
     if (routeTaskId && currentTaskId !== routeTaskId) {
         return _jsx(Card, { loading: true, className: "page-card" });
     }
-    return (_jsxs(Space, { direction: "vertical", size: 24, style: { width: '100%' }, children: [_jsx("div", { children: _jsxs(Space, { wrap: true, style: { width: '100%', justifyContent: 'space-between' }, children: [_jsxs("div", { children: [_jsx(Title, { level: 2, children: "\u4EFB\u52A1\u8BE6\u60C5" }), _jsx(Paragraph, { children: "\u4F60\u6B63\u5728\u67E5\u770B\u67D0\u4E2A\u5386\u53F2\u4EFB\u52A1\u7684\u8BE6\u60C5\u9875\uFF0C\u53EF\u5728\u8FD9\u91CC\u5207\u6362\u603B\u89C8\u3001\u8BC1\u636E\u3001Vision\u3001Persona\u3001\u7ED3\u679C\u3001\u62A5\u544A\u4E0E\u5BA1\u6838\u89C6\u56FE\u3002" })] }), _jsx(Button, { children: _jsx(Link, { to: TASK_HISTORY_PATH, children: "\u8FD4\u56DE\u5386\u53F2\u4EFB\u52A1" }) })] }) }), resolvedTaskId ? _jsx(CurrentTaskSummaryBar, { taskId: resolvedTaskId, taskSummary: taskSummary }) : null, _jsx(Tabs, { activeKey: activeKey, items: tabItems, onChange: (key) => {
+    return (_jsxs(Space, { direction: "vertical", size: 24, style: { width: '100%' }, children: [_jsx("div", { children: _jsxs(Space, { wrap: true, style: { width: '100%', justifyContent: 'space-between' }, children: [_jsxs("div", { children: [_jsx(Title, { level: 2, children: "\u4EFB\u52A1\u8BE6\u60C5" }), _jsx(Paragraph, { children: "\u5F53\u524D\u8BE6\u60C5\u9875\u6309\u5206\u6790\u94FE\u8DEF\u5207\u5206\uFF1A\u5148\u770B\u8F93\u5165\u89E3\u6790\uFF0C\u518D\u5206\u522B\u67E5\u770B\u4F53\u9A8C\u6A21\u578B\u3001\u5916\u90E8\u68C0\u7D22\u3001\u89C6\u89C9\u8BC4\u5BA1\u3001\u6A21\u62DF\u7528\u6237\uFF0C\u6700\u540E\u6536\u53E3\u5230\u7EFC\u5408\u7ED3\u8BBA\u4E0E\u6B63\u5F0F\u62A5\u544A\u3002" })] }), _jsx(Button, { children: _jsx(Link, { to: TASK_HISTORY_PATH, children: "\u8FD4\u56DE\u5386\u53F2\u4EFB\u52A1" }) })] }) }), resolvedTaskId ? _jsx(CurrentTaskSummaryBar, { taskId: resolvedTaskId, taskSummary: taskSummary }) : null, _jsx(Tabs, { activeKey: activeKey, items: tabItems, onChange: (key) => {
                     if (!resolvedTaskId)
                         return;
                     navigate(buildTaskDetailPath(resolvedTaskId, key));

@@ -3,6 +3,7 @@ import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from './layouts/AppLayout';
 import { RouteLoading } from './components/RouteLoading';
 import {
+  TASK_DETAIL_SECTION_EXPERIENCE,
   TASK_DETAIL_SECTION_EVIDENCE,
   TASK_DETAIL_SECTION_OPS,
   TASK_DETAIL_SECTION_OVERVIEW,
@@ -26,6 +27,9 @@ const WorkbenchPage = lazy(() =>
 );
 const EvidenceBoardPage = lazy(() =>
   import('./pages/EvidenceBoardPage').then((module) => ({ default: module.EvidenceBoardPage })),
+);
+const ExperienceModelPage = lazy(() =>
+  import('./pages/ExperienceModelPage').then((module) => ({ default: module.ExperienceModelPage })),
 );
 const VisionLabPage = lazy(() =>
   import('./pages/VisionLabPage').then((module) => ({ default: module.VisionLabPage })),
@@ -66,6 +70,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to={TASK_DETAIL_SECTION_OVERVIEW} replace /> },
           { path: 'overview', element: renderLazy(WorkbenchPage) },
+          { path: 'experience', element: renderLazy(ExperienceModelPage) },
           { path: 'evidence', element: renderLazy(EvidenceBoardPage) },
           { path: 'vision', element: renderLazy(VisionLabPage) },
           { path: 'persona', element: renderLazy(PersonaLabPage) },
@@ -77,6 +82,7 @@ export const router = createBrowserRouter([
       { path: 'current', element: <Navigate to={TASK_HISTORY_PATH} replace /> },
       { path: 'current/:taskId', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_OVERVIEW} useRouteTaskId /> },
       { path: 'current/:taskId/overview', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_OVERVIEW} useRouteTaskId /> },
+      { path: 'current/:taskId/experience', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_EXPERIENCE} useRouteTaskId /> },
       { path: 'current/:taskId/evidence', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_EVIDENCE} useRouteTaskId /> },
       { path: 'current/:taskId/vision', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_VISION} useRouteTaskId /> },
       { path: 'current/:taskId/persona', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_PERSONA} useRouteTaskId /> },
@@ -84,6 +90,7 @@ export const router = createBrowserRouter([
       { path: 'current/:taskId/report', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_REPORT} useRouteTaskId /> },
       { path: 'current/:taskId/ops', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_OPS} useRouteTaskId /> },
       { path: 'workbench', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_OVERVIEW} /> },
+      { path: 'experience', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_EXPERIENCE} /> },
       { path: 'evidence', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_EVIDENCE} /> },
       { path: 'vision', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_VISION} /> },
       { path: 'persona', element: <LegacyCurrentTaskRedirect section={TASK_DETAIL_SECTION_PERSONA} /> },

@@ -1,6 +1,6 @@
 {
   "name": "@users-research/server",
-  "version": "0.1.0",
+  "version": "0.0325.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,8 +12,8 @@
   "dependencies": {
     "@fastify/cors": "^11.2.0",
     "@prisma/client": "^6.5.0",
-    "@users-research/model-clients": "0.1.0",
-    "@users-research/shared": "0.1.0",
+    "@users-research/model-clients": "0.0325.1",
+    "@users-research/shared": "0.0325.1",
     "better-sqlite3": "^12.8.0",
     "fastify": "^5.2.1"
   },

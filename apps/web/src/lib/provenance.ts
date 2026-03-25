@@ -15,6 +15,8 @@ export interface ProvenanceSummary {
   acceptedRealEvidenceCount: number;
   acceptedRealT1EvidenceCount: number;
   pendingExternalEvidenceCount: number;
+  fetchedArticleEvidenceCount: number;
+  searchResultEvidenceCount: number;
   frameworkEvidenceCount: number;
   simulatedEvidenceCount: number;
   visionFindingCount: number;
@@ -27,12 +29,29 @@ export interface ProvenanceSummary {
 
 const fallbackWarningPattern = /mock|fallback|回退|弱视觉推断/i;
 
+const normalizeBoundaryNoteLabel = (note: string): string => {
+  const trimmed = note.trim();
+  const externalSearchMatched = trimmed.match(/^\[externalSearch\]\[([^\]]+)\]\s*(.+)$/i);
+  if (!externalSearchMatched) return trimmed;
+
+  const [, kind, content] = externalSearchMatched;
+  const kindLabelMap: Record<string, string> = {
+    fetched_article: '外部检索 / 已抓内容',
+    fetched_document: '外部检索 / 已抓文档',
+    search_result: '外部检索 / 搜索线索',
+    partial_fallback: '外部检索 / 部分回退',
+    fallback: '外部检索 / 回退',
+  };
+
+  return `${kindLabelMap[kind] || `外部检索 / ${kind}`}：${content.trim()}`;
+};
+
 const normalizeStrings = (items: Array<string | undefined>): string[] =>
   Array.from(
     new Set(
       items
         .filter((item): item is string => typeof item === 'string')
-        .map((item) => item.trim())
+        .map((item) => normalizeBoundaryNoteLabel(item))
         .filter(Boolean),
     ),
   );
@@ -73,6 +92,18 @@ export const buildProvenanceSummary = (options: {
       item.reviewStatus !== 'accepted' &&
       item.reviewStatus !== 'rejected',
   ).length;
+  const fetchedArticleEvidenceCount = evidencePool.filter(
+    (item) =>
+      item.sourceLevel === 'external' &&
+      ['fetched_article', 'fetched_document'].includes(
+        String((item.traceLocation as Record<string, unknown> | undefined)?.authenticity || ''),
+      ),
+  ).length;
+  const searchResultEvidenceCount = evidencePool.filter(
+    (item) =>
+      item.sourceLevel === 'external' &&
+      ((item.traceLocation as Record<string, unknown> | undefined)?.authenticity === 'search_result'),
+  ).length;
   const frameworkEvidenceCount = evidencePool.filter(
     (item) => item.sourceLevel === 'framework' || item.sourceType === 'experience_model',
   ).length;
@@ -102,6 +133,22 @@ export const buildProvenanceSummary = (options: {
       key: 'pending-external',
       label: `外部待核查 ${pendingExternalEvidenceCount}`,
       color: 'orange',
+    });
+  }
+
+  if (fetchedArticleEvidenceCount > 0) {
+    tags.push({
+      key: 'fetched-article',
+      label: `已抓内容 ${fetchedArticleEvidenceCount}`,
+      color: 'cyan',
+    });
+  }
+
+  if (searchResultEvidenceCount > 0) {
+    tags.push({
+      key: 'search-result',
+      label: `搜索线索 ${searchResultEvidenceCount}`,
+      color: 'blue',
     });
   }
 
@@ -153,6 +200,8 @@ export const buildProvenanceSummary = (options: {
     acceptedRealEvidenceCount: acceptedRealEvidence.length,
     acceptedRealT1EvidenceCount,
     pendingExternalEvidenceCount,
+    fetchedArticleEvidenceCount,
+    searchResultEvidenceCount,
     frameworkEvidenceCount,
     simulatedEvidenceCount,
     visionFindingCount,

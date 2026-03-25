@@ -86,6 +86,7 @@ export const OutputPreviewCard = ({
   const judgments = asJudgments(content?.judgments);
   const nextActions = asStringArray(content?.nextActions);
   const findings = asFindings(content?.findings);
+  const reviewNotes = asStringArray(content?.reviewNotes);
 
   return (
     <Card className="page-card" title={output.outputType} extra={extra}>
@@ -133,6 +134,17 @@ export const OutputPreviewCard = ({
             <List
               size="small"
               dataSource={output.gateNotes}
+              renderItem={(item) => <List.Item>{item}</List.Item>}
+            />
+          </div>
+        ) : null}
+
+        {reviewNotes.length > 0 ? (
+          <div>
+            <Text strong>多模型复核意见</Text>
+            <List
+              size="small"
+              dataSource={reviewNotes}
               renderItem={(item) => <List.Item>{item}</List.Item>}
             />
           </div>
@@ -191,7 +203,7 @@ export const OutputPreviewCard = ({
           />
         ) : null}
 
-        {!judgments.length && !nextActions.length && !findings.length ? (
+        {!judgments.length && !nextActions.length && !findings.length && !reviewNotes.length ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description="当前输出暂未提供可结构化预览内容"

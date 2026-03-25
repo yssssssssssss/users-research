@@ -4,7 +4,9 @@ import type {
   CreateTaskRequest,
   EvidenceItem,
   EvidenceListResponse,
+  ModuleResults,
   OutputsResponse,
+  PersonaSimulationResult,
   PersonaResponse,
   PreviewPlanResponse,
   ReportResponse,
@@ -13,7 +15,9 @@ import type {
   ResearchTaskState,
   ReviewReportRequest,
   ReviewReportResponse,
+  SynthesisResult,
   TaskSummaryResponse,
+  VisualReviewResult,
   VisionResponse,
 } from '@users-research/shared';
 import type {
@@ -38,6 +42,7 @@ import {
 import { analyzeExperienceModels } from './experienceModelService.js';
 import { reportStore, taskStore } from './mockStore.js';
 import {
+  findTaskByEvidenceIdFromSqlite,
   getReportFromSqlite,
   getTaskFromSqlite,
   getTaskIdByReportIdFromSqlite,
@@ -73,6 +78,126 @@ const taskInclude = {
 const parseJson = <T>(value: unknown, fallback: T): T => {
   if (value && typeof value === 'object') return value as T;
   return fallback;
+};
+
+const buildLegacyVisualReviewResult = (task: ResearchTaskState): VisualReviewResult | undefined => {
+  if (!task.visionFindings.length) return undefined;
+
+  const consensus = task.visionFindings
+    .filter((item) => item.isConsensus)
+    .map((item) => item.content);
+  const conflicts = task.visionFindings
+    .filter((item) => item.isConflict)
+    .map((item) => item.content);
+
+  return {
+    task: task.analysisPlan?.visualReviewPlan.task || '视觉评审',
+    reviewDimensions: task.analysisPlan?.visualReviewPlan.reviewDimensions || [],
+    reviewers: [],
+    consensus,
+    conflicts,
+    prioritizedActions: [...consensus, ...conflicts].slice(0, 5),
+    confidenceNotes: ['从旧版 visionFindings 回填，缺少 reviewer 级详细记录。'],
+    warnings: task.runStats.warnings.filter((item) => /Vision/i.test(item)),
+  };
+};
+
+const buildLegacyPersonaSimulationResult = (task: ResearchTaskState): PersonaSimulationResult | undefined => {
+  if (!task.personaFindings.length) return undefined;
+
+  const uniquePersonas = Array.from(
+    new Map(task.personaFindings.map((item) => [item.personaName, item])).values(),
+  );
+  const sharedPainPoints = task.personaFindings
+    .filter((item) => item.stance === 'oppose' || item.stance === 'confused' || item.stance === 'hesitate')
+    .map((item) => item.content)
+    .slice(0, 5);
+  const sharedHighlights = task.personaFindings
+    .filter((item) => item.stance === 'support')
+    .map((item) => item.content)
+    .slice(0, 5);
+  const divergences = Array.from(new Set(task.personaFindings.map((item) => item.theme).filter(Boolean) as string[]));
+
+  return {
+    task: task.analysisPlan?.personaSimulationPlan.task || '模拟用户评审',
+    personaTypes: task.analysisPlan?.personaSimulationPlan.personaTypes || [],
+    digitalPersonas: uniquePersonas.map((item, index) => ({
+      profileId: `legacy_persona_${index + 1}`,
+      personaName: item.personaName,
+      description: item.content,
+      concerns: [item.content],
+      motivations: item.theme ? [item.theme] : [],
+    })),
+    reviews: uniquePersonas.map((item, index) => ({
+      profileId: `legacy_persona_${index + 1}`,
+      personaName: item.personaName,
+      description: item.content,
+      firstImpression: item.content,
+      detailedExperience: item.content,
+      scores: {},
+      theme: item.theme,
+      stance: item.stance,
+      isSimulated: true as const,
+    })),
+    aggregate: {
+      scoreSummary: {},
+      sharedPainPoints,
+      sharedHighlights,
+      divergences,
+      churnRisks: sharedPainPoints.slice(0, 3),
+    },
+    warnings: task.runStats.warnings.filter((item) => /Persona/i.test(item)),
+  };
+};
+
+const buildLegacySynthesisResult = (task: ResearchTaskState): SynthesisResult | undefined => {
+  if (task.synthesisResult) return task.synthesisResult;
+  const latestReport = [...task.finalReports].sort((left, right) => right.version - left.version)[0];
+  if (!latestReport) return undefined;
+
+  return {
+    consensus: [],
+    conflicts: [],
+    conclusions: latestReport.sections
+      .filter((section) => section.type === 'judgment' || section.type === 'summary')
+      .slice(0, 3)
+      .map((section) => ({
+        title: section.title,
+        content: section.content,
+        supportingSources: [section.type],
+        confidence: 'medium' as const,
+      })),
+    topRecommendations:
+      latestReport.sections.find((section) => section.type === 'action')?.content
+        ?.split(/\r?\n/)
+        .map((item) => item.replace(/^\d+\.\s*/, '').trim())
+        .filter(Boolean)
+        .slice(0, 5) || [],
+    hypothesesToValidate: [],
+    nextResearchActions: [],
+    evidenceBoundary:
+      latestReport.sections.find((section) => section.type === 'boundary')?.content
+        ?.split(/\r?\n/)
+        .map((item) => item.replace(/^\d+\.\s*/, '').trim())
+        .filter(Boolean)
+        .slice(0, 5) || [],
+    warnings: task.runStats.warnings,
+  };
+};
+
+const hydrateLegacyTaskState = (task: ResearchTaskState): ResearchTaskState => {
+  const nextModuleResults: ModuleResults = {
+    ...task.moduleResults,
+    visualReview: task.moduleResults?.visualReview || buildLegacyVisualReviewResult(task),
+    personaSimulation:
+      task.moduleResults?.personaSimulation || buildLegacyPersonaSimulationResult(task),
+  };
+
+  return {
+    ...task,
+    moduleResults: nextModuleResults,
+    synthesisResult: task.synthesisResult || buildLegacySynthesisResult(task),
+  };
 };
 
 const asJson = (value: unknown): Prisma.InputJsonValue => value as Prisma.InputJsonValue;
@@ -352,6 +477,27 @@ const getAsyncRecomputeWarnings = (task: ResearchTaskState): string[] => {
 const mergeWarnings = (...groups: Array<string[] | undefined>): string[] =>
   Array.from(new Set(groups.flatMap((group) => group || [])));
 
+const getEvidenceAuthenticity = (item: EvidenceItem): string | undefined => {
+  const trace = asRecord(item.traceLocation);
+  return typeof trace?.authenticity === 'string' ? trace.authenticity : undefined;
+};
+
+const formatEvidenceLine = (item: EvidenceItem, index: number): string => {
+  const trace = asRecord(item.traceLocation);
+  const sourceDomain =
+    typeof trace?.sourceDomain === 'string' && trace.sourceDomain.trim()
+      ? trace.sourceDomain.trim()
+      : undefined;
+  const evidenceBits = [
+    `${index + 1}. [${item.tier}/${item.sourceLevel}] ${item.content}`,
+    item.sourceName ? `来源：${item.sourceName}` : undefined,
+    sourceDomain ? `域名：${sourceDomain}` : undefined,
+    item.sourceDate ? `时间：${item.sourceDate}` : undefined,
+  ].filter(Boolean);
+
+  return evidenceBits.join('｜');
+};
+
 const getExperienceModelIds = (task: ResearchTaskState): string[] =>
   task.evidencePool
     .filter((item) => item.sourceType === 'experience_model')
@@ -403,6 +549,7 @@ const recomputeTaskJudgment = async (
     currentNode: 'output_router',
     rqLevel: synthesizedRqLevel,
     candidateOutputs: judgmentResult.candidateOutputs,
+    synthesisResult: judgmentResult.result,
     runStats: {
       ...task.runStats,
       finishedAt: trigger === 'run' ? task.runStats.finishedAt : new Date().toISOString(),
@@ -505,9 +652,40 @@ const buildReportSectionsFromOutput = (
         }))
     : [];
   const nextActions = asStringArray(content?.nextActions);
-  const evidenceSummary = task.evidencePool
-    .slice(0, 3)
-    .map((item, index) => `${index + 1}. [${item.tier}/${item.sourceLevel}] ${item.content}`)
+  const reviewNotes = asStringArray(content?.reviewNotes);
+  const acceptedRealEvidence = task.evidencePool
+    .filter(
+      (item) =>
+        item.reviewStatus === 'accepted' &&
+        item.sourceLevel !== 'simulated' &&
+        item.sourceLevel !== 'framework' &&
+        item.sourceType !== 'experience_model',
+    )
+    .slice(0, 3);
+  const fetchedArticleEvidence = task.evidencePool
+    .filter(
+      (item) =>
+        item.sourceLevel === 'external' &&
+        item.reviewStatus !== 'rejected' &&
+        ['fetched_article', 'fetched_document'].includes(getEvidenceAuthenticity(item) || ''),
+    )
+    .slice(0, 3);
+  const searchLeadEvidence = task.evidencePool
+    .filter(
+      (item) =>
+        item.sourceLevel === 'external' &&
+        item.reviewStatus !== 'rejected' &&
+        getEvidenceAuthenticity(item) === 'search_result',
+    )
+    .slice(0, 3);
+  const evidenceSummary = acceptedRealEvidence
+    .map((item, index) => formatEvidenceLine(item, index))
+    .join('\n');
+  const fetchedArticleSummary = fetchedArticleEvidence
+    .map((item, index) => formatEvidenceLine(item, index))
+    .join('\n');
+  const searchLeadSummary = searchLeadEvidence
+    .map((item, index) => formatEvidenceLine(item, index))
     .join('\n');
   const frameworkSummary = task.evidencePool
     .filter((item) => item.sourceType === 'experience_model')
@@ -542,13 +720,37 @@ const buildReportSectionsFromOutput = (
     });
   }
 
+  if (reviewNotes.length > 0) {
+    sections.push({
+      type: 'review',
+      title: '多模型复核意见',
+      content: reviewNotes.map((item, index) => `${index + 1}. ${item}`).join('\n'),
+    });
+  }
+
   sections.push(...judgments);
 
   if (evidenceSummary) {
     sections.push({
       type: 'evidence',
-      title: '关键证据',
+      title: '已接受真实证据',
       content: evidenceSummary,
+    });
+  }
+
+  if (fetchedArticleSummary) {
+    sections.push({
+      type: 'external_evidence',
+      title: '已抓内容外部证据',
+      content: fetchedArticleSummary,
+    });
+  }
+
+  if (searchLeadSummary) {
+    sections.push({
+      type: 'search_leads',
+      title: '待核查搜索线索',
+      content: searchLeadSummary,
     });
   }
 
@@ -581,6 +783,18 @@ const buildReportSectionsFromOutput = (
       type: 'hypothesis',
       title: 'Persona 假设线索',
       content: task.personaFindings.map((item) => `- ${item.personaName}：${item.content}`).join('\n'),
+    });
+  }
+
+  const boundaryWarnings = mergeWarnings(
+    selected.gateNotes,
+    task.runStats.warnings.filter((item) => !item.startsWith('多模型复核：')),
+  ).slice(0, 8);
+  if (boundaryWarnings.length > 0) {
+    sections.push({
+      type: 'boundary',
+      title: '真实性边界与风险',
+      content: boundaryWarnings.map((item, index) => `${index + 1}. ${item}`).join('\n'),
     });
   }
 
@@ -1125,6 +1339,10 @@ export const createTask = async (payload: CreateTaskRequest): Promise<ResearchTa
       ossKey: item.ossKey,
       sourceUrl: item.sourceUrl,
       mimeType: item.mimeType,
+      dataUrl: item.dataUrl,
+      localPath: item.localPath,
+      sizeBytes: item.sizeBytes,
+      sha256: item.sha256,
     })),
     uploadedDesigns: (payload.designFiles || []).map((item, index) => ({
       id: item.fileId,
@@ -1134,16 +1352,23 @@ export const createTask = async (payload: CreateTaskRequest): Promise<ResearchTa
       ossKey: item.ossKey,
       sourceUrl: item.sourceUrl,
       mimeType: item.mimeType,
+      dataUrl: item.dataUrl,
+      localPath: item.localPath,
+      sizeBytes: item.sizeBytes,
+      sha256: item.sha256,
     })),
     enabledModules: payload.enabledModules,
     status: 'draft',
     reviewStatus: 'not_required',
-    currentNode: 'input_router',
+    currentNode: 'input_parser',
+    analysisPlan: undefined,
     subQuestions: [],
     evidencePool: [],
     evidenceConflicts: [],
     visionFindings: [],
     personaFindings: [],
+    moduleResults: undefined,
+    synthesisResult: undefined,
     candidateOutputs: [],
     finalReports: [],
     runStats: { warnings: [] },
@@ -1162,13 +1387,13 @@ export const getTask = async (taskId: string): Promise<ResearchTaskState> => {
     : shouldUseSqlite()
       ? getTaskFromSqlite(taskId)
       : getTaskFromMemory(taskId);
-  return applyOutputGates(task);
+  return applyOutputGates(hydrateLegacyTaskState(task));
 };
 
 export const previewPlan = async (taskId: string): Promise<PreviewPlanResponse> => {
   const task = await getTask(taskId);
   const branches = [
-    'problem_decomposer',
+    'input_parser',
     'experience_model_router',
     'evidence_alignment',
     'judgment_synthesizer',
@@ -1195,7 +1420,7 @@ export const runTask = async (taskId: string): Promise<ResearchTaskState> => {
     ...task,
     status: 'running',
     reviewStatus: 'pending',
-    currentNode: 'problem_decomposer',
+    currentNode: 'input_parser',
     runStats: {
       ...task.runStats,
       startedAt: new Date().toISOString(),
@@ -1315,6 +1540,41 @@ const findTaskByEvidenceIdFromMemory = (
 const getNextTierForDowngrade = (tier: EvidenceItem['tier']): EvidenceItem['tier'] =>
   tier === 'T1' ? 'T2' : 'T3';
 
+const isTierPromotionTarget = (tier: EvidenceItem['tier']): boolean => tier === 'T1' || tier === 'T2';
+
+const validateExternalEvidencePromotion = (
+  evidence: EvidenceItem,
+  payload: ReviewEvidenceRequest,
+  nextTier: EvidenceItem['tier'],
+) => {
+  if (evidence.sourceLevel !== 'external' || payload.reviewStatus !== 'accepted') {
+    return;
+  }
+
+  const authenticity = getEvidenceAuthenticity(evidence);
+  if (authenticity === 'search_result' && isTierPromotionTarget(nextTier)) {
+    throw badRequest('搜索线索在未抓到原始内容前，不能提升为 T1/T2。');
+  }
+
+  if (
+    isTierPromotionTarget(nextTier) &&
+    authenticity !== 'fetched_article' &&
+    authenticity !== 'fetched_document'
+  ) {
+    throw badRequest('外部证据只有在抓到原始网页或文档内容后，才允许提升为 T1/T2。');
+  }
+
+  if (isTierPromotionTarget(nextTier)) {
+    if (!payload.reviewer?.trim()) {
+      throw badRequest('外部证据提升为 T1/T2 时必须记录审核人。');
+    }
+
+    if (!payload.comment?.trim() || payload.comment.trim().length < 8) {
+      throw badRequest('外部证据提升为 T1/T2 时必须填写不少于 8 个字的复核理由。');
+    }
+  }
+};
+
 const normalizeReviewedEvidence = (
   evidence: EvidenceItem,
   payload: ReviewEvidenceRequest,
@@ -1324,6 +1584,8 @@ const normalizeReviewedEvidence = (
     (payload.reviewStatus === 'downgraded'
       ? getNextTierForDowngrade(evidence.tier)
       : evidence.tier);
+
+  validateExternalEvidencePromotion(evidence, payload, nextTier);
 
   if (
     nextTier === 'T1' &&
@@ -1350,6 +1612,11 @@ const normalizeReviewedEvidence = (
         reviewer: payload.reviewer,
         comment: payload.comment,
         reviewedAt: new Date().toISOString(),
+        previousTier: evidence.tier,
+        nextTier,
+        previousReviewStatus: evidence.reviewStatus,
+        authenticity: getEvidenceAuthenticity(evidence),
+        verifiedByHuman: evidence.sourceLevel === 'external' && isTierPromotionTarget(nextTier),
       },
     },
   };
@@ -1392,6 +1659,45 @@ export const reviewEvidence = async (
       },
     };
     await persistStateToDb(reviewedTask);
+    scheduleAsyncTaskRecompute(reviewedTask);
+
+    return {
+      taskId: reviewedTask.taskId,
+      evidence: reviewedEvidence,
+      updatedAt: getEvidenceReviewedAt(reviewedEvidence),
+      recomputeStatus: 'queued',
+      taskStatus: reviewedTask.status,
+      currentNode: reviewedTask.currentNode,
+    };
+  }
+
+  if (shouldUseSqlite()) {
+    const matched = findTaskByEvidenceIdFromSqlite(evidenceId);
+    if (!matched) throw new Error('证据不存在');
+
+    const targetEvidence = matched.task.evidencePool[matched.evidenceIndex];
+    if (
+      recomputeJobs.has(matched.task.taskId) ||
+      (matched.task.status === 'running' && matched.task.currentNode === 'judgment_synthesizer')
+    ) {
+      throw badRequest('当前已有后台重算进行中，请稍候再提交新的证据复核。');
+    }
+
+    const reviewedEvidence = normalizeReviewedEvidence(targetEvidence, payload);
+    const reviewedTask: ResearchTaskState = {
+      ...matched.task,
+      evidencePool: matched.task.evidencePool.map((item) =>
+        item.id === evidenceId ? reviewedEvidence : item,
+      ),
+      status: 'running',
+      reviewStatus: 'pending',
+      currentNode: 'judgment_synthesizer',
+      runStats: {
+        ...matched.task.runStats,
+        warnings: mergeWarnings(matched.task.runStats.warnings, ['证据复核已提交，后台正在重算综合判断。']),
+      },
+    };
+    saveTaskToSqlite(reviewedTask);
     scheduleAsyncTaskRecompute(reviewedTask);
 
     return {
@@ -1563,6 +1869,13 @@ const rerunBranchJudgment = async (
     ...runningTask,
     currentNode: task.enabledModules.personaSandbox ? 'persona_sandbox' : 'judgment_synthesizer',
     visionFindings: visionResult.visionFindings,
+    moduleResults: {
+      ...task.moduleResults,
+      visualReview:
+        branch === 'vision_moe' && 'result' in visionResult
+          ? visionResult.result
+          : task.moduleResults?.visualReview,
+    },
     runStats: {
       ...runningTask.runStats,
       warnings: mergeWarnings(runningTask.runStats.warnings, visionResult.warnings),
@@ -1578,6 +1891,13 @@ const rerunBranchJudgment = async (
     ...personaInput,
     currentNode: 'judgment_synthesizer',
     personaFindings: personaResult.personaFindings,
+    moduleResults: {
+      ...personaInput.moduleResults,
+      personaSimulation:
+        (branch === 'persona_sandbox' || branch === 'vision_moe') && 'result' in personaResult
+          ? personaResult.result
+          : personaInput.moduleResults?.personaSimulation,
+    },
     runStats: {
       ...personaInput.runStats,
       warnings: mergeWarnings(personaInput.runStats.warnings, personaResult.warnings),
@@ -1585,7 +1905,11 @@ const rerunBranchJudgment = async (
   };
 
   const recomputedTask = await recomputeTaskJudgment(synthesisInput, 'evidence_review');
-  return shouldUseDb() ? persistStateToDb(recomputedTask) : saveTaskToMemory(recomputedTask);
+  return shouldUseDb()
+    ? persistStateToDb(recomputedTask)
+    : shouldUseSqlite()
+      ? saveTaskToSqlite(recomputedTask)
+      : saveTaskToMemory(recomputedTask);
 };
 
 export const rerunVision = async (taskId: string) => {

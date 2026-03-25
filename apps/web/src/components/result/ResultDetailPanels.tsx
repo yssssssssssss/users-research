@@ -1,5 +1,6 @@
 import { Card, Col, Empty, List, Row, Space, Tag, Typography } from 'antd';
 import type { EvidenceItem, PersonaFinding, VisionFinding } from '@users-research/shared';
+import { getEvidenceAuthenticityTag, getEvidenceSourceDomain } from '../../lib/evidenceMeta';
 
 const { Paragraph, Text } = Typography;
 
@@ -16,6 +17,8 @@ interface ExperienceModelView {
 interface ResultDetailPanelsProps {
   experienceModels: ExperienceModelView[];
   evidenceHighlights: EvidenceItem[];
+  fetchedArticleHighlights: EvidenceItem[];
+  searchLeadHighlights: EvidenceItem[];
   sourceTypeLabelMap: Record<string, string>;
   visionHighlights: VisionFinding[];
   personaHighlights: PersonaFinding[];
@@ -26,6 +29,8 @@ interface ResultDetailPanelsProps {
 export const ResultDetailPanels = ({
   experienceModels,
   evidenceHighlights,
+  fetchedArticleHighlights,
+  searchLeadHighlights,
   sourceTypeLabelMap,
   visionHighlights,
   personaHighlights,
@@ -49,7 +54,7 @@ export const ResultDetailPanels = ({
                         {item.mode}
                       </Tag>
                     </Space>
-                    <Paragraph style={{ marginBottom: 0 }}>{item.content}</Paragraph>
+                    <Paragraph style={{ marginBottom: 0, wordBreak: 'break-word' }}>{item.content}</Paragraph>
                     {item.dimensions.length ? (
                       <Space wrap>
                         {item.dimensions.map((dimension) => (
@@ -88,30 +93,101 @@ export const ResultDetailPanels = ({
       </Col>
       <Col xs={24} xl={12}>
         <Card title="核心证据" className="page-card">
-          {evidenceHighlights.length ? (
-            <List
-              itemLayout="vertical"
-              dataSource={evidenceHighlights}
-              renderItem={(item) => (
-                <List.Item key={item.id}>
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    <Space wrap>
-                      <Tag color={item.tier === 'T1' ? 'green' : item.tier === 'T2' ? 'blue' : 'gold'}>
-                        {item.tier}
-                      </Tag>
-                      <Tag>{sourceTypeLabelMap[item.sourceType] || item.sourceType}</Tag>
-                      <Tag>{item.reviewStatus}</Tag>
-                      {item.isUsedInReport ? <Tag color="cyan">已入报告</Tag> : null}
-                    </Space>
-                    <Paragraph style={{ marginBottom: 0 }}>{item.content}</Paragraph>
-                    <Text type="secondary">
-                      {item.sourceName || '未命名来源'}
-                      {item.sourceDate ? `｜${item.sourceDate}` : ''}
-                    </Text>
-                  </Space>
-                </List.Item>
-              )}
-            />
+          {fetchedArticleHighlights.length || searchLeadHighlights.length || evidenceHighlights.length ? (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              {fetchedArticleHighlights.length ? (
+                <div>
+                  <Text strong>已抓内容外部证据</Text>
+                  <List
+                    itemLayout="vertical"
+                    dataSource={fetchedArticleHighlights}
+                    renderItem={(item) => (
+                      <List.Item key={item.id}>
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <Space wrap>
+                            <Tag color={item.tier === 'T1' ? 'green' : item.tier === 'T2' ? 'blue' : 'gold'}>
+                              {item.tier}
+                            </Tag>
+                            <Tag>{sourceTypeLabelMap[item.sourceType] || item.sourceType}</Tag>
+                            <Tag color={getEvidenceAuthenticityTag(item).color}>
+                              {getEvidenceAuthenticityTag(item).label}
+                            </Tag>
+                          </Space>
+                          <Paragraph style={{ marginBottom: 0, wordBreak: 'break-word' }}>{item.content}</Paragraph>
+                          <Text type="secondary">
+                            {item.sourceName || '未命名来源'}
+                            {getEvidenceSourceDomain(item) ? `｜${getEvidenceSourceDomain(item)}` : ''}
+                            {item.sourceDate ? `｜${item.sourceDate}` : ''}
+                          </Text>
+                        </Space>
+                      </List.Item>
+                    )}
+                  />
+                </div>
+              ) : null}
+
+              {searchLeadHighlights.length ? (
+                <div>
+                  <Text strong>待核查搜索线索</Text>
+                  <List
+                    itemLayout="vertical"
+                    dataSource={searchLeadHighlights}
+                    renderItem={(item) => (
+                      <List.Item key={item.id}>
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <Space wrap>
+                            <Tag color="gold">{item.tier}</Tag>
+                            <Tag>{sourceTypeLabelMap[item.sourceType] || item.sourceType}</Tag>
+                            <Tag color={getEvidenceAuthenticityTag(item).color}>
+                              {getEvidenceAuthenticityTag(item).label}
+                            </Tag>
+                          </Space>
+                          <Paragraph style={{ marginBottom: 0, wordBreak: 'break-word' }}>{item.content}</Paragraph>
+                          <Text type="secondary">
+                            {item.sourceName || '未命名来源'}
+                            {getEvidenceSourceDomain(item) ? `｜${getEvidenceSourceDomain(item)}` : ''}
+                            {item.sourceDate ? `｜${item.sourceDate}` : ''}
+                          </Text>
+                        </Space>
+                      </List.Item>
+                    )}
+                  />
+                </div>
+              ) : null}
+
+              {evidenceHighlights.length ? (
+                <div>
+                  <Text strong>其他核心证据</Text>
+                  <List
+                    itemLayout="vertical"
+                    dataSource={evidenceHighlights}
+                    renderItem={(item) => (
+                      <List.Item key={item.id}>
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <Space wrap>
+                            <Tag color={item.tier === 'T1' ? 'green' : item.tier === 'T2' ? 'blue' : 'gold'}>
+                              {item.tier}
+                            </Tag>
+                            <Tag>{sourceTypeLabelMap[item.sourceType] || item.sourceType}</Tag>
+                            <Tag>{item.reviewStatus}</Tag>
+                            <Tag color={getEvidenceAuthenticityTag(item).color}>
+                              {getEvidenceAuthenticityTag(item).label}
+                            </Tag>
+                            {item.isUsedInReport ? <Tag color="cyan">已入报告</Tag> : null}
+                          </Space>
+                          <Paragraph style={{ marginBottom: 0, wordBreak: 'break-word' }}>{item.content}</Paragraph>
+                          <Text type="secondary">
+                            {item.sourceName || '未命名来源'}
+                            {getEvidenceSourceDomain(item) ? `｜${getEvidenceSourceDomain(item)}` : ''}
+                            {item.sourceDate ? `｜${item.sourceDate}` : ''}
+                          </Text>
+                        </Space>
+                      </List.Item>
+                    )}
+                  />
+                </div>
+              ) : null}
+            </Space>
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可展示证据" />
           )}
@@ -139,7 +215,7 @@ export const ResultDetailPanels = ({
                           <Tag>{item.findingType}</Tag>
                           {item.isConflict ? <Tag color="purple">有分歧</Tag> : null}
                         </Space>
-                        <span>{item.content}</span>
+                        <span style={{ wordBreak: 'break-word', display: 'block' }}>{item.content}</span>
                       </Space>
                     </List.Item>
                   )}
@@ -163,7 +239,7 @@ export const ResultDetailPanels = ({
                           {item.stance ? <Tag>{item.stance}</Tag> : null}
                           {item.theme ? <Tag color="blue">{item.theme}</Tag> : null}
                         </Space>
-                        <span>{item.content}</span>
+                        <span style={{ wordBreak: 'break-word', display: 'block' }}>{item.content}</span>
                       </Space>
                     </List.Item>
                   )}

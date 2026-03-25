@@ -28,6 +28,241 @@ export type OutputType =
   | 'design_review_report'
   | 'hypothesis_pack';
 
+
+export type ArtifactType =
+  | 'ui_design'
+  | 'copy'
+  | 'product_plan'
+  | 'marketing_asset'
+  | 'prototype';
+
+export type VisualReviewerRole = 'structural' | 'emotional' | 'behavioral';
+
+export interface AnalysisSubQuestionPlan {
+  text: string;
+  audience?: string;
+  scenario?: string;
+  journeyPath?: string;
+  decisionPoint?: string;
+}
+
+export interface ExperienceModelPlan {
+  task: string;
+  focusDimensions: string[];
+  preferredModelIds: string[];
+  evaluationQuestions: string[];
+}
+
+export interface ExternalSearchPlan {
+  task: string;
+  searchQueries: string[];
+  searchIntent: string;
+  expectedInsights: string[];
+}
+
+export interface VisualReviewPlan {
+  task: string;
+  reviewDimensions: string[];
+  businessGoal: string;
+  keyConcerns: string[];
+}
+
+export interface PersonaSimulationPlan {
+  task: string;
+  personaTypes: string[];
+  simulationScenarios: string[];
+  ratingDimensions: string[];
+}
+
+export interface AnalysisPlan {
+  coreGoal: string;
+  artifactType: ArtifactType;
+  evaluationFocus: string[];
+  targetAudience: string;
+  businessContext: string;
+  experienceModelPlan: ExperienceModelPlan;
+  externalSearchPlan: ExternalSearchPlan;
+  visualReviewPlan: VisualReviewPlan;
+  personaSimulationPlan: PersonaSimulationPlan;
+  subQuestions: AnalysisSubQuestionPlan[];
+}
+
+export interface ExperienceModelDimensionEvaluation {
+  name: string;
+  score?: number;
+  observation: string;
+  rationale?: string;
+  suggestion?: string;
+}
+
+export interface ExperienceModelEvaluation {
+  modelId: string;
+  modelName: string;
+  suitability: string;
+  limitations: string[];
+  dimensions: ExperienceModelDimensionEvaluation[];
+  overallScore?: number;
+  strengths: string[];
+  risks: string[];
+  topPriorityFix?: string;
+  followupQuestions: string[];
+  evidenceBoundary: string;
+}
+
+export interface ExperienceModelResult {
+  task: string;
+  selectedModelIds: string[];
+  selectedModelNames: string[];
+  focusDimensions: string[];
+  evaluations: ExperienceModelEvaluation[];
+  summary?: string;
+  warnings: string[];
+}
+
+export interface ExternalSearchInsight {
+  insight: string;
+  source: string;
+  confidence: 'high' | 'medium' | 'low';
+  tier: TierLevel;
+}
+
+export interface ExternalSearchResult {
+  task: string;
+  queries: string[];
+  benchmarkFindings: string[];
+  trendFindings: string[];
+  riskFindings: string[];
+  keyInsights: ExternalSearchInsight[];
+  evidenceBoundary: string[];
+  warnings: string[];
+}
+
+export interface VisualReviewDimension {
+  name: string;
+  score?: number;
+  evidence: string;
+  suggestion?: string;
+}
+
+export interface VisualReviewIssue {
+  severity: 'low' | 'medium' | 'high';
+  issue: string;
+  suggestion?: string;
+}
+
+export interface VisualReviewerResult {
+  role: VisualReviewerRole;
+  roleLabel: string;
+  requestedModel?: string;
+  actualModel?: string;
+  attemptedModels?: string[];
+  dimensions: VisualReviewDimension[];
+  issues: VisualReviewIssue[];
+  overallScore?: number;
+  topSuggestion?: string;
+}
+
+export interface VisualReviewResult {
+  task: string;
+  reviewDimensions: string[];
+  reviewers: VisualReviewerResult[];
+  consensus: string[];
+  conflicts: string[];
+  prioritizedActions: string[];
+  confidenceNotes: string[];
+  warnings: string[];
+}
+
+export interface PersonaProfileTemplate {
+  id: string;
+  type: string;
+  summary: string;
+  behaviorTraits: string[];
+  concerns: string[];
+  motivations: string[];
+}
+
+export interface DigitalPersona {
+  profileId: string;
+  personaName: string;
+  age?: string;
+  occupation?: string;
+  city?: string;
+  description: string;
+  usageScenario?: string;
+  concerns: string[];
+  motivations: string[];
+}
+
+export interface PersonaScorecard {
+  usability?: number;
+  attractiveness?: number;
+  trust?: number;
+  conversionIntent?: number;
+  emotionalResonance?: number;
+}
+
+export interface PersonaReviewResult {
+  profileId: string;
+  personaName: string;
+  description: string;
+  requestedModel?: string;
+  actualModel?: string;
+  attemptedModels?: string[];
+  firstImpression: string;
+  detailedExperience: string;
+  scores: PersonaScorecard;
+  overallScore?: number;
+  quoteToFriend?: string;
+  topChangeRequest?: string;
+  theme?: string;
+  stance?: 'support' | 'oppose' | 'hesitate' | 'confused' | 'mixed';
+  isSimulated: true;
+}
+
+export interface PersonaSimulationAggregate {
+  scoreSummary: PersonaScorecard;
+  sharedPainPoints: string[];
+  sharedHighlights: string[];
+  divergences: string[];
+  churnRisks: string[];
+}
+
+export interface PersonaSimulationResult {
+  task: string;
+  personaTypes: string[];
+  digitalPersonas: DigitalPersona[];
+  reviews: PersonaReviewResult[];
+  aggregate: PersonaSimulationAggregate;
+  warnings: string[];
+}
+
+export interface SynthesisConclusion {
+  title: string;
+  content: string;
+  supportingSources: string[];
+  confidence: 'high' | 'medium' | 'low';
+  action?: string;
+}
+
+export interface SynthesisResult {
+  consensus: string[];
+  conflicts: string[];
+  conclusions: SynthesisConclusion[];
+  topRecommendations: string[];
+  hypothesesToValidate: string[];
+  nextResearchActions: string[];
+  evidenceBoundary: string[];
+  warnings: string[];
+}
+
+export interface ModuleResults {
+  experienceModel?: ExperienceModelResult;
+  externalSearch?: ExternalSearchResult;
+  visualReview?: VisualReviewResult;
+  personaSimulation?: PersonaSimulationResult;
+}
+
 export interface EnabledModules {
   evidence: boolean;
   visionMoE: boolean;
@@ -44,6 +279,10 @@ export interface TaskFileRef {
   ossKey?: string;
   sourceUrl?: string;
   mimeType?: string;
+  dataUrl?: string;
+  localPath?: string;
+  sizeBytes?: number;
+  sha256?: string;
 }
 
 export interface SubQuestion {
@@ -151,11 +390,14 @@ export interface ResearchTaskState {
   reviewStatus: ReviewStatus;
   currentNode?: string;
   rqLevel?: RqLevel;
+  analysisPlan?: AnalysisPlan;
   subQuestions: SubQuestion[];
   evidencePool: EvidenceItem[];
   evidenceConflicts: EvidenceConflict[];
   visionFindings: VisionFinding[];
   personaFindings: PersonaFinding[];
+  moduleResults?: ModuleResults;
+  synthesisResult?: SynthesisResult;
   candidateOutputs: CandidateOutput[];
   finalReports: FinalReport[];
   runStats: {

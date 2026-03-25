@@ -22,6 +22,21 @@ export interface CreateTaskFileInput {
   ossKey?: string;
   sourceUrl?: string;
   mimeType?: string;
+  dataUrl?: string;
+  localPath?: string;
+  sizeBytes?: number;
+  sha256?: string;
+}
+
+export interface UploadAssetRequest {
+  fileName: string;
+  fileType: 'document' | 'image' | 'design' | 'spreadsheet';
+  mimeType?: string;
+  dataUrl: string;
+}
+
+export interface UploadAssetResponse {
+  file: CreateTaskFileInput;
 }
 
 export interface CreateTaskRequest {

@@ -4,7 +4,10 @@ import { appConfig } from './config/env.js';
 import { apiRoutes } from './routes/index.js';
 
 export const buildServer = () => {
-  const app = Fastify({ logger: appConfig.env === 'development' });
+  const app = Fastify({
+    logger: appConfig.env === 'development',
+    bodyLimit: 50 * 1024 * 1024,
+  });
 
   app.register(cors, {
     origin: appConfig.server.corsOrigin,

@@ -22,6 +22,8 @@ const getClients = (): ModelClients => {
     geminiApiKey: appConfig.models.geminiApiKey,
     jimengImageApiUrl: appConfig.models.jimengImageApiUrl,
     jimengApiKey: appConfig.models.jimengApiKey,
+    textTimeoutMs: appConfig.models.requestTimeoutMs,
+    streamTimeoutMs: appConfig.models.streamTimeoutMs,
     fetchImpl: fetch,
   });
 
@@ -45,9 +47,20 @@ const createTextRoute = (
 });
 
 const NODE_MODEL_ROUTES = {
+  inputParser: [
+    createTextRoute('GPT 5.4', 'GPT 5.4', ['GPT 5.2', 'GLM-5']),
+    createTextRoute('GPT 5.2', 'GPT 5.2', ['GLM-5']),
+    createTextRoute('GLM-5', 'GLM-5', ['Doubao-Seed-2.0-pro']),
+    createTextRoute('Doubao-Seed-2.0-pro', '豆包 Seed 2.0 Pro', ['GLM-5']),
+  ],
   problemDecomposer: [
     createTextRoute('GLM-5', 'GLM-5', ['Doubao-Seed-2.0-pro']),
     createTextRoute('Doubao-Seed-2.0-pro', '豆包 Seed 2.0 Pro', ['GLM-5']),
+  ],
+  experienceEvaluator: [
+    createTextRoute('GPT 5.4', 'GPT 5.4', ['GPT 5.2', 'GLM-5']),
+    createTextRoute('GPT 5.2', 'GPT 5.2', ['GLM-5']),
+    createTextRoute('GLM-5', 'GLM-5', ['Doubao-Seed-2.0-pro']),
   ],
   patternAnalyzer: [
     createTextRoute('GLM-5', 'GLM-5', ['Doubao-Seed-2.0-pro', 'Kimi-K2.5']),
@@ -63,8 +76,15 @@ const NODE_MODEL_ROUTES = {
   ],
   vision: [
     createTextRoute('GPT 5.2', 'GPT 5.2'),
-    createTextRoute('Gemini-3.1-Pro-Preview', 'Gemini 3.1 Pro Preview', ['GPT 5.2']),
-    createTextRoute('Claude-Opus-4.6', 'Claude Opus 4.6', ['GPT 5.2']),
+  ],
+  visionStructural: [
+    createTextRoute('GPT 5.2', 'GPT 5.2'),
+  ],
+  visionEmotional: [
+    createTextRoute('GPT 5.2', 'GPT 5.2'),
+  ],
+  visionBehavioral: [
+    createTextRoute('GPT 5.2', 'GPT 5.2'),
   ],
   persona: [
     createTextRoute('Kimi-K2.5', 'Kimi K2.5', ['GLM-5', 'MiniMax-M2.5']),
@@ -73,6 +93,22 @@ const NODE_MODEL_ROUTES = {
     createTextRoute('Doubao-Seed-2.0-pro', '豆包 Seed 2.0 Pro', ['GLM-5', 'Kimi-K2.5']),
   ],
 } as const;
+
+const hasDedicatedAnthropicConfig = () =>
+  Boolean(appConfig.models.anthropicApiUrl && appConfig.models.anthropicApiKey);
+
+const getVisionRoutes = (): TextModelRoute[] =>
+  NODE_MODEL_ROUTES.vision.filter((route) => {
+    if (route.id === 'Claude-Opus-4.6') {
+      return hasDedicatedAnthropicConfig();
+    }
+    return true;
+  }).map((route) => ({
+    id: route.id,
+    name: route.name,
+    systemPrompt: route.systemPrompt,
+    fallbacks: route.fallbacks?.map((item) => ({ id: item.id, name: item.name })),
+  }));
 
 const FALLBACK_ROUTE_MAP = Object.values(NODE_MODEL_ROUTES)
   .flat()
@@ -161,8 +197,13 @@ export const modelGateway = {
   isTextModelEnabled: (): boolean =>
     !appConfig.models.disabled && Boolean(appConfig.models.textApiUrl && appConfig.models.textApiKey),
 
+  getInputParserModels: (): ModelOption[] => toModelOptions(NODE_MODEL_ROUTES.inputParser),
+
   getProblemDecomposerModels: (): ModelOption[] =>
     toModelOptions(NODE_MODEL_ROUTES.problemDecomposer),
+
+  getExperienceEvaluatorModels: (): ModelOption[] =>
+    toModelOptions(NODE_MODEL_ROUTES.experienceEvaluator),
 
   getPatternAnalyzerModels: (): ModelOption[] => toModelOptions(NODE_MODEL_ROUTES.patternAnalyzer),
 
@@ -173,9 +214,22 @@ export const modelGateway = {
 
   getReviewTextRoutes: (): TextModelRoute[] => toTextRoutes(NODE_MODEL_ROUTES.judgmentReview),
 
-  getVisionTextModels: (): ModelOption[] => toModelOptions(NODE_MODEL_ROUTES.vision),
+  getVisionTextModels: (): ModelOption[] => toModelOptions(getVisionRoutes()),
 
-  getVisionTextRoutes: (): TextModelRoute[] => toTextRoutes(NODE_MODEL_ROUTES.vision),
+  getVisionTextRoutes: (): TextModelRoute[] => getVisionRoutes(),
+
+  getVisionRoleRoutes: (role: 'structural' | 'emotional' | 'behavioral'): TextModelRoute[] => {
+    const routeMap = {
+      structural: NODE_MODEL_ROUTES.visionStructural,
+      emotional: NODE_MODEL_ROUTES.visionEmotional,
+      behavioral: NODE_MODEL_ROUTES.visionBehavioral,
+    } as const;
+    const routes = routeMap[role] || NODE_MODEL_ROUTES.vision;
+    return toTextRoutes(routes).filter((route) => {
+      if (route.id === 'Claude-Opus-4.6') return hasDedicatedAnthropicConfig();
+      return true;
+    });
+  },
 
   getPersonaTextModels: (): ModelOption[] => toModelOptions(NODE_MODEL_ROUTES.persona),
 
@@ -195,12 +249,36 @@ export const modelGateway = {
     return result.text;
   },
 
+  async runInputParser(options: {
+    systemPrompt: string;
+    prompt: string;
+  }): Promise<string> {
+    const result = await runTextModelWithFallback({
+      models: toTextRoutes(NODE_MODEL_ROUTES.inputParser),
+      systemPrompt: options.systemPrompt,
+      prompt: options.prompt,
+    });
+    return result.text;
+  },
+
   async runProblemDecomposer(options: {
     systemPrompt: string;
     prompt: string;
   }): Promise<string> {
     const result = await runTextModelWithFallback({
       models: toTextRoutes(NODE_MODEL_ROUTES.problemDecomposer),
+      systemPrompt: options.systemPrompt,
+      prompt: options.prompt,
+    });
+    return result.text;
+  },
+
+  async runExperienceEvaluator(options: {
+    systemPrompt: string;
+    prompt: string;
+  }): Promise<string> {
+    const result = await runTextModelWithFallback({
+      models: toTextRoutes(NODE_MODEL_ROUTES.experienceEvaluator),
       systemPrompt: options.systemPrompt,
       prompt: options.prompt,
     });

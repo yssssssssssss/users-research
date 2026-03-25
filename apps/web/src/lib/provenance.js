@@ -1,7 +1,22 @@
 const fallbackWarningPattern = /mock|fallback|回退|弱视觉推断/i;
+const normalizeBoundaryNoteLabel = (note) => {
+    const trimmed = note.trim();
+    const externalSearchMatched = trimmed.match(/^\[externalSearch\]\[([^\]]+)\]\s*(.+)$/i);
+    if (!externalSearchMatched)
+        return trimmed;
+    const [, kind, content] = externalSearchMatched;
+    const kindLabelMap = {
+        fetched_article: '外部检索 / 已抓内容',
+        fetched_document: '外部检索 / 已抓文档',
+        search_result: '外部检索 / 搜索线索',
+        partial_fallback: '外部检索 / 部分回退',
+        fallback: '外部检索 / 回退',
+    };
+    return `${kindLabelMap[kind] || `外部检索 / ${kind}`}：${content.trim()}`;
+};
 const normalizeStrings = (items) => Array.from(new Set(items
     .filter((item) => typeof item === 'string')
-    .map((item) => item.trim())
+    .map((item) => normalizeBoundaryNoteLabel(item))
     .filter(Boolean)));
 export const buildBoundaryNotes = (options) => normalizeStrings([
     ...(options.report?.gateResult.blockedReasons || []),
@@ -20,6 +35,10 @@ export const buildProvenanceSummary = (options) => {
     const pendingExternalEvidenceCount = evidencePool.filter((item) => item.sourceLevel === 'external' &&
         item.reviewStatus !== 'accepted' &&
         item.reviewStatus !== 'rejected').length;
+    const fetchedArticleEvidenceCount = evidencePool.filter((item) => item.sourceLevel === 'external' &&
+        ['fetched_article', 'fetched_document'].includes(String(item.traceLocation?.authenticity || ''))).length;
+    const searchResultEvidenceCount = evidencePool.filter((item) => item.sourceLevel === 'external' &&
+        (item.traceLocation?.authenticity === 'search_result')).length;
     const frameworkEvidenceCount = evidencePool.filter((item) => item.sourceLevel === 'framework' || item.sourceType === 'experience_model').length;
     const simulatedEvidenceCount = evidencePool.filter((item) => item.sourceLevel === 'simulated' ||
         item.sourceType === 'persona_generated' ||
@@ -40,6 +59,20 @@ export const buildProvenanceSummary = (options) => {
             key: 'pending-external',
             label: `外部待核查 ${pendingExternalEvidenceCount}`,
             color: 'orange',
+        });
+    }
+    if (fetchedArticleEvidenceCount > 0) {
+        tags.push({
+            key: 'fetched-article',
+            label: `已抓内容 ${fetchedArticleEvidenceCount}`,
+            color: 'cyan',
+        });
+    }
+    if (searchResultEvidenceCount > 0) {
+        tags.push({
+            key: 'search-result',
+            label: `搜索线索 ${searchResultEvidenceCount}`,
+            color: 'blue',
         });
     }
     if (frameworkEvidenceCount > 0) {
@@ -84,6 +117,8 @@ export const buildProvenanceSummary = (options) => {
         acceptedRealEvidenceCount: acceptedRealEvidence.length,
         acceptedRealT1EvidenceCount,
         pendingExternalEvidenceCount,
+        fetchedArticleEvidenceCount,
+        searchResultEvidenceCount,
         frameworkEvidenceCount,
         simulatedEvidenceCount,
         visionFindingCount,

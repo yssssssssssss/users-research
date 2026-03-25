@@ -43,6 +43,8 @@ export interface ModelClientConfig {
   jimengImageApiUrl?: string;
   jimengApiKey?: string;
   defaultSystemPrompt?: string;
+  textTimeoutMs?: number;
+  streamTimeoutMs?: number;
   /**
    * 在浏览器开发环境下，如果你希望把
    * https://modelservice.jdcloud.com/xxx
@@ -282,8 +284,8 @@ const getFetch = (config?: ModelClientConfig): typeof fetch => {
   return fetchImpl.bind(globalThis);
 };
 
-const DEFAULT_TEXT_TIMEOUT_MS = 60000;
-const DEFAULT_STREAM_TIMEOUT_MS = 90000;
+const DEFAULT_TEXT_TIMEOUT_MS = 120000;
+const DEFAULT_STREAM_TIMEOUT_MS = 120000;
 
 const fetchWithTimeout = async (
   fetchImpl: typeof fetch,
@@ -592,20 +594,39 @@ const toAnthropicContent = (
   content: string | ChatContentPart[],
 ): string | Array<
   | { type: 'text'; text: string }
-  | { type: 'image'; source: { type: 'url'; url: string } }
+  | {
+      type: 'image';
+      source:
+        | { type: 'url'; url: string }
+        | { type: 'base64'; media_type: string; data: string };
+    }
 > => {
   if (typeof content === 'string') return content;
 
   return content.map((part) =>
     part.type === 'text'
       ? { type: 'text' as const, text: part.text }
-      : {
-          type: 'image' as const,
-          source: {
-            type: 'url' as const,
-            url: part.image_url.url,
-          },
-        },
+      : (() => {
+          const url = part.image_url.url;
+          if (url.startsWith('data:')) {
+            return {
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: extractMimeType(url),
+                data: extractBase64Data(url),
+              },
+            };
+          }
+
+          return {
+            type: 'image' as const,
+            source: {
+              type: 'url' as const,
+              url,
+            },
+          };
+        })(),
   );
 };
 
@@ -901,6 +922,14 @@ export const isSeedreamModel = (model: string): boolean =>
 
 export const createModelClients = (config: ModelClientConfig = {}) => {
   const fetchImpl = getFetch(config);
+  const textTimeoutMs =
+    Number.isFinite(config.textTimeoutMs) && Number(config.textTimeoutMs) > 0
+      ? Number(config.textTimeoutMs)
+      : DEFAULT_TEXT_TIMEOUT_MS;
+  const streamTimeoutMs =
+    Number.isFinite(config.streamTimeoutMs) && Number(config.streamTimeoutMs) > 0
+      ? Number(config.streamTimeoutMs)
+      : DEFAULT_STREAM_TIMEOUT_MS;
 
   const chatCompletions = async ({
     model,
@@ -948,14 +977,14 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
               },
         ),
       },
-      getRemainingTimeout(startedAt, DEFAULT_TEXT_TIMEOUT_MS),
+      getRemainingTimeout(startedAt, textTimeoutMs),
     );
 
     if (!response.ok) {
       throw new Error(
         `HTTP ${response.status}: ${await runWithTimeout(
           '模型错误响应读取超时',
-          getRemainingTimeout(startedAt, DEFAULT_TEXT_TIMEOUT_MS),
+          getRemainingTimeout(startedAt, textTimeoutMs),
           response.text(),
         )}`,
       );
@@ -963,7 +992,7 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
 
     const data = await runWithTimeout(
       '模型响应解析超时',
-      getRemainingTimeout(startedAt, DEFAULT_TEXT_TIMEOUT_MS),
+      getRemainingTimeout(startedAt, textTimeoutMs),
       response.json(),
     );
     const text = isAnthropic
@@ -1022,14 +1051,14 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
               },
         ),
       },
-      getRemainingTimeout(startedAt, DEFAULT_STREAM_TIMEOUT_MS),
+      getRemainingTimeout(startedAt, streamTimeoutMs),
     );
 
     if (!response.ok) {
       throw new Error(
         `HTTP ${response.status}: ${await runWithTimeout(
           '模型错误响应读取超时',
-          getRemainingTimeout(startedAt, DEFAULT_STREAM_TIMEOUT_MS),
+          getRemainingTimeout(startedAt, streamTimeoutMs),
           response.text(),
         )}`,
       );
@@ -1038,7 +1067,7 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
     if (!response.body) {
       const data = await runWithTimeout(
         '流式响应解析超时',
-        getRemainingTimeout(startedAt, DEFAULT_STREAM_TIMEOUT_MS),
+        getRemainingTimeout(startedAt, streamTimeoutMs),
         response.json(),
       );
       const text = isAnthropic
@@ -1059,7 +1088,7 @@ export const createModelClients = (config: ModelClientConfig = {}) => {
       while (true) {
         const { value, done } = await runWithTimeout(
           '流式读取超时',
-          getRemainingTimeout(startedAt, DEFAULT_STREAM_TIMEOUT_MS),
+          getRemainingTimeout(startedAt, streamTimeoutMs),
           reader.read(),
         );
         if (done) break;

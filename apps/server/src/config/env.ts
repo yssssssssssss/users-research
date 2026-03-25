@@ -95,6 +95,9 @@ export const appConfig = {
     geminiApiKey: readEnv('GEMINI_API_KEY', 'VITE_GEMINI_API_KEY'),
     jimengImageApiUrl: readEnv('JIMENG_IMAGE_API_URL', 'VITE_JIMENG_IMAGE_API_URL'),
     jimengApiKey: readEnv('JIMENG_API_KEY', 'VITE_JIMENG_API_KEY'),
+    requestTimeoutMs: Number(readEnv('TEXT_MODEL_TIMEOUT_MS') || '120000'),
+    streamTimeoutMs: Number(readEnv('TEXT_MODEL_STREAM_TIMEOUT_MS') || '120000'),
+    visionTimeoutMs: Number(readEnv('VISION_MODEL_TIMEOUT_MS') || '120000'),
   },
   search: {
     tavilyApiKey: readEnv('TAVILY_API_KEY'),

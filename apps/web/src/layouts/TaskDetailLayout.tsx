@@ -6,6 +6,7 @@ import { useTaskStore } from '../store/taskStore';
 import {
   buildTaskDetailPath,
   getTaskDetailTabKey,
+  TASK_DETAIL_SECTION_EXPERIENCE,
   TASK_DETAIL_SECTION_EVIDENCE,
   TASK_DETAIL_SECTION_OPS,
   TASK_DETAIL_SECTION_OVERVIEW,
@@ -37,12 +38,13 @@ export const TaskDetailLayout = () => {
   }, [currentTaskId, routeTaskId, setCurrentTaskId]);
 
   const tabItems = [
-    { key: TASK_DETAIL_SECTION_OVERVIEW, label: '总览' },
-    { key: TASK_DETAIL_SECTION_EVIDENCE, label: '证据看板' },
-    { key: TASK_DETAIL_SECTION_VISION, label: 'Vision Lab' },
-    { key: TASK_DETAIL_SECTION_PERSONA, label: 'Persona Lab' },
-    { key: TASK_DETAIL_SECTION_RESULT, label: '结果总览' },
-    { key: TASK_DETAIL_SECTION_REPORT, label: '综合报告' },
+    { key: TASK_DETAIL_SECTION_OVERVIEW, label: '总览 / 输入解析' },
+    { key: TASK_DETAIL_SECTION_EXPERIENCE, label: '体验模型' },
+    { key: TASK_DETAIL_SECTION_EVIDENCE, label: '外部检索 / 证据' },
+    { key: TASK_DETAIL_SECTION_VISION, label: '视觉评审' },
+    { key: TASK_DETAIL_SECTION_PERSONA, label: '模拟用户' },
+    { key: TASK_DETAIL_SECTION_RESULT, label: '综合结论' },
+    { key: TASK_DETAIL_SECTION_REPORT, label: '正式报告' },
     { key: TASK_DETAIL_SECTION_OPS, label: '审核与观测' },
   ].map((item) => ({
     ...item,
@@ -60,7 +62,7 @@ export const TaskDetailLayout = () => {
           <div>
             <Title level={2}>任务详情</Title>
             <Paragraph>
-              你正在查看某个历史任务的详情页，可在这里切换总览、证据、Vision、Persona、结果、报告与审核视图。
+              当前详情页按分析链路切分：先看输入解析，再分别查看体验模型、外部检索、视觉评审、模拟用户，最后收口到综合结论与正式报告。
             </Paragraph>
           </div>
           <Button>

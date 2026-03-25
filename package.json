@@ -1,7 +1,7 @@
 {
   "name": "users-research",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0325.1",
   "type": "module",
   "workspaces": [
     "apps/*",
@@ -19,7 +19,11 @@
     "check": "npm run typecheck && npm run build",
     "smoke:server": "node scripts/smoke-server.mjs",
     "smoke:server:real": "node scripts/smoke-server.mjs real",
-    "smoke:rerun": "node scripts/smoke-rerun.mjs"
+    "smoke:rerun": "node scripts/smoke-rerun.mjs",
+    "smoke:preflight": "node scripts/smoke-preflight.mjs",
+    "smoke:evidence-review:real": "node scripts/smoke-evidence-review.mjs",
+    "smoke:persistence": "node scripts/smoke-persistence.mjs",
+    "smoke:persistence:real": "node scripts/smoke-persistence.mjs real"
   },
   "devDependencies": {
     "@esbuild/darwin-arm64": "^0.27.4"

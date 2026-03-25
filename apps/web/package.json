@@ -1,6 +1,6 @@
 {
   "name": "@users-research/web",
-  "version": "0.1.0",
+  "version": "0.0325.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@users-research/shared": "0.1.0",
+    "@users-research/shared": "0.0325.1",
     "antd": "^5.24.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
